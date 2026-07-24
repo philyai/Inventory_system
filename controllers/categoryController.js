@@ -7,7 +7,12 @@ const getCategories = async (req, res) => {
     const categories = await Category.findAll({
       order: [['category_name', 'ASC']],
     });
-    res.status(200).json(categories);
+    const visibleCategories = categories.filter(category => {
+      const name = String(category.category_name || '').trim().toLowerCase();
+      return !['other', 'others'].includes(name);
+    });
+
+    res.status(200).json(visibleCategories);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch categories', error: error.message });
   }

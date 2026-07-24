@@ -2,34 +2,107 @@ const Disposal = require('../models/disposal');
 const Item = require('../models/item');
 const User = require('../models/user');
 const Notification = require('../models/notification');
+const sequelize = require('../models');
 const { Op, literal } = require('sequelize');
 const { calculateStatus } = require('./itemController');
 
-// POST create a disposal request (Disposal Management -> "request for disposal")
+const attachApproverDetails = async disposals => {
+  const approverIds = [
+    ...new Set(
+      disposals
+        .map(disposal => disposal.approved_by)
+        .filter(approvedBy => approvedBy !== null && approvedBy !== undefined)
+    ),
+  ];
+
+  const approvers = approverIds.length
+    ? await User.findAll({
+        where: { users_id: { [Op.in]: approverIds } },
+        attributes: ['users_id', 'username', 'role'],
+      })
+    : [];
+
+  const approverById = new Map(
+    approvers.map(approver => [Number(approver.users_id), approver.toJSON()])
+  );
+
+  return disposals.map(disposal => {
+    const disposalData = disposal.toJSON();
+    disposalData.approved_by_user =
+      approverById.get(Number(disposal.approved_by)) || null;
+    return disposalData;
+  });
+};
+
+// POST create a disposal request (IT/Admin IT action)
 const createDisposal = async (req, res) => {
   try {
     const { item_id, reason } = req.body;
+    const normalizedItemId = Number(item_id);
+    const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
 
-    const item = await Item.findByPk(item_id);
-    if (!item) {
-      return res.status(404).json({ message: 'Item not found' });
+    if (!Number.isInteger(normalizedItemId) || normalizedItemId <= 0) {
+      return res.status(400).json({ message: 'A valid item_id is required' });
     }
 
-    const disposal = await Disposal.create({
-      item_id,
-      requested_by: req.user.users_id,
-      users_id: req.user.users_id,
-      request_date: literal('SYSDATETIME()'),
-      reason,
-      disposal_status: 'Pending Approval',
+    if (!normalizedReason) {
+      return res.status(400).json({ message: 'A disposal reason is required' });
+    }
+
+    if (normalizedReason.length > 255) {
+      return res.status(400).json({ message: 'Disposal reason must not exceed 255 characters' });
+    }
+
+    const disposal = await sequelize.transaction(async (transaction) => {
+      const item = await Item.findByPk(normalizedItemId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (!item) {
+        const error = new Error('Item not found');
+        error.status = 404;
+        throw error;
+      }
+
+      if (Number(item.quantity) <= 0) {
+        const error = new Error('An item with no available quantity cannot be requested for disposal');
+        error.status = 400;
+        throw error;
+      }
+
+      const existingRequest = await Disposal.findOne({
+        where: {
+          item_id: normalizedItemId,
+          disposal_status: { [Op.in]: ['Pending Approval', 'For Disposal'] },
+        },
+        transaction,
+      });
+
+      if (existingRequest) {
+        const error = new Error('This item already has an active disposal request');
+        error.status = 409;
+        throw error;
+      }
+
+      return Disposal.create({
+        item_id: normalizedItemId,
+        requested_by: req.user.users_id,
+        users_id: req.user.users_id,
+        request_date: literal('SYSDATETIME()'),
+        reason: normalizedReason,
+        disposal_status: 'Pending Approval',
+      }, { transaction });
     });
 
-    const purchasingUsers = await User.findAll({ where: { role: 'Purchasing' } });
+    const reviewers = await User.findAll({
+      where: { role: { [Op.in]: ['Purchasing', 'Admin IT'] } },
+    });
     await Promise.all(
-      purchasingUsers.map(u =>
+      reviewers.map(user =>
         Notification.create({
-          user_id: u.users_id,
-          message: `New disposal request submitted for review.`,
+          user_id: user.users_id,
+          message: 'New disposal request submitted for review.',
           type: 'disposal_requested',
         })
       )
@@ -41,6 +114,11 @@ const createDisposal = async (req, res) => {
     if (error.parent && error.parent.message) {
       console.error('SQL error detail:', error.parent.message);
     }
+
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
     res.status(500).json({
       message: 'Failed to create disposal request',
       error: error.message,
@@ -48,7 +126,6 @@ const createDisposal = async (req, res) => {
     });
   }
 };
-
 // GET all disposals. The Approved UI tab contains both Purchasing-approved
 // requests waiting for IT and requests that IT has finished disposing.
 const getDisposals = async (req, res) => {
@@ -67,7 +144,8 @@ const getDisposals = async (req, res) => {
       order: [['request_date', 'DESC']],
     });
 
-    res.status(200).json(disposals);
+    const disposalsWithApprovers = await attachApproverDetails(disposals);
+    res.status(200).json(disposalsWithApprovers);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch disposals', error: error.message });
   }
@@ -83,13 +161,14 @@ const getDisposalById = async (req, res) => {
       return res.status(404).json({ message: 'Disposal request not found' });
     }
 
-    res.status(200).json(disposal);
+    const [disposalWithApprover] = await attachApproverDetails([disposal]);
+    res.status(200).json(disposalWithApprover);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch disposal', error: error.message });
   }
 };
 
-// PUT approve or reject a disposal (Purchasing action)
+// PUT approve or reject a pending disposal (Purchasing/Admin IT action)
 const updateDisposalStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -102,6 +181,12 @@ const updateDisposalStatus = async (req, res) => {
     const disposal = await Disposal.findByPk(id);
     if (!disposal) {
       return res.status(404).json({ message: 'Disposal request not found' });
+    }
+
+    if (disposal.disposal_status !== 'Pending Approval') {
+      return res.status(409).json({
+        message: 'Only pending disposal requests can be approved or rejected',
+      });
     }
 
     disposal.disposal_status = disposal_status;
@@ -121,7 +206,7 @@ const updateDisposalStatus = async (req, res) => {
   }
 };
 
-// PUT finalize a disposal (IT action — confirms physical disposal)
+// PUT finalize a disposal (IT/Admin IT action - confirms physical disposal)
 const finalizeDisposal = async (req, res) => {
   try {
     const { id } = req.params;

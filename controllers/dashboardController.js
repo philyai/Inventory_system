@@ -1,6 +1,7 @@
 const { fn, col, literal } = require('sequelize');
 const Item = require('../models/item');
 const Category = require('../models/category');
+const Disposal = require('../models/disposal');
 
 // GET /dashboard/summary
 const getSummary = async (req, res) => {
@@ -10,7 +11,9 @@ const getSummary = async (req, res) => {
 
     const itemsInStock = await Item.sum('quantity', { where: { status: 'In Stock' } });
     const lowStockCount = await Item.count({ where: { status: 'Low Stock' } });
-    const forDisposalCount = await Item.count({ where: { status: 'For Disposal' } });
+    const forDisposalCount = await Disposal.count({
+      where: { disposal_status: 'Pending Approval' },
+    });
     const reservedCount = await Item.count({ where: { status: 'Reserved' } });
 
     res.status(200).json({

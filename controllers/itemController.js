@@ -1,7 +1,9 @@
 const Item = require('../models/item');
 const Category = require('../models/category');
 const ItemLocation = require('../models/itemLocation');
-const { Op } = require('sequelize');
+const Disposal = require('../models/disposal');
+const sequelize = require('../models/index');
+const { Op, fn, col, where } = require('sequelize');
 
 function calculateStatus(quantity, reorderLevel) {
   if (quantity <= 0) return 'Out of Stock';
@@ -13,8 +15,8 @@ function getCategoryPrefix(categoryName) {
   return categoryName.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase();
 }
 
-async function generateItemCode(category_id) {
-  const category = await Category.findByPk(category_id);
+async function generateItemCode(category_id, transaction) {
+  const category = await Category.findByPk(category_id, { transaction });
   if (!category) {
     throw new Error('Invalid category_id');
   }
@@ -26,6 +28,7 @@ async function generateItemCode(category_id) {
       item_code: { [Op.like]: `${prefix}-%` }
     },
     order: [['item_code', 'DESC']],
+    transaction,
   });
 
   console.log('generateItemCode debug:', {
@@ -66,10 +69,39 @@ const getItems = async (req, res) => {
 
     const items = await Item.findAll({
       where,
-      include: [Category, ItemLocation],
+      include: [
+        Category,
+        ItemLocation,
+        {
+          model: Disposal,
+          attributes: [
+            'disposal_id',
+            'reason',
+            'disposal_status',
+            'request_date',
+            'approved_date',
+            'disposed_date',
+          ],
+        },
+      ],
     });
 
-    res.status(200).json(items);
+    const visibleItems = items
+      .filter(item =>
+        !item.Disposals.some(disposal => disposal.disposal_status === 'Disposed')
+      )
+      .map(item => {
+        const itemData = item.toJSON();
+        const activeDisposal = itemData.Disposals.find(disposal =>
+          ['Pending Approval', 'For Disposal'].includes(disposal.disposal_status)
+        );
+
+        delete itemData.Disposals;
+        itemData.active_disposal = activeDisposal || null;
+        return itemData;
+      });
+
+    res.status(200).json(visibleItems);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch items', error: error.message });
   }
@@ -173,19 +205,59 @@ const createItem = async (req, res) => {
   try {
     const {
       item_name, brand, model, serial_number,
-      category_id, location_id, quantity, reorder_level,
+      category_id, category_name, location_id, quantity, reorder_level,
       unit_cost, status
     } = req.body;
 
-    const item_code = await generateItemCode(category_id);
+    const normalizedCategoryName =
+      typeof category_name === 'string' ? category_name.trim() : '';
+    const usesOtherCategory = ['other', 'others'].includes(
+      String(category_id || '').toLowerCase()
+    );
 
-    const newItem = await Item.create({
-      item_code, item_name, brand, model, serial_number,
-      category_id, location_id, quantity, reorder_level,
-      unit_cost, status,
-      image_url: req.file ? `/uploads/items/${req.file.filename}` : null,
-      created_by: req.user.users_id,
-      date_added: new Date(),
+    if (usesOtherCategory && !normalizedCategoryName) {
+      return res.status(400).json({
+        message: 'category_name is required when category_id is Others',
+      });
+    }
+
+    if (!category_id && !normalizedCategoryName) {
+      return res.status(400).json({
+        message: 'category_id or category_name is required',
+      });
+    }
+
+    const newItem = await sequelize.transaction(async (transaction) => {
+      let resolvedCategoryId = category_id;
+
+      if (normalizedCategoryName) {
+        let category = await Category.findOne({
+          where: where(
+            fn('LOWER', col('category_name')),
+            normalizedCategoryName.toLowerCase()
+          ),
+          transaction,
+        });
+
+        if (!category) {
+          category = await Category.create({
+            category_name: normalizedCategoryName,
+          }, { transaction });
+        }
+
+        resolvedCategoryId = category.category_id;
+      }
+
+      const item_code = await generateItemCode(resolvedCategoryId, transaction);
+
+      return Item.create({
+        item_code, item_name, brand, model, serial_number,
+        category_id: resolvedCategoryId, location_id, quantity, reorder_level,
+        unit_cost, status,
+        image_url: req.file ? `/uploads/items/${req.file.filename}` : null,
+        created_by: req.user.users_id,
+        date_added: new Date(),
+      }, { transaction });
     });
     res.status(201).json(newItem);
   } catch (error) {

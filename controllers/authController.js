@@ -102,4 +102,14 @@ const logout = async (req, res) => {
   }
 };
 
-module.exports = { signIn, logout };
+const getSession = (req, res) => {
+  res.status(200).json({
+    user: {
+      users_id: req.user.users_id,
+      username: req.user.username,
+      role: req.user.role,
+    },
+  });
+};
+
+module.exports = { signIn, logout, getSession };

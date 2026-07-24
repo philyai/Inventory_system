@@ -1,7 +1,7 @@
 {
   "name": "SERVER",
   "version": "1.0.1",
-  "description": "",
+  "description": "backend",
   "license": "ISC",
   "author": "phil",
   "type": "commonjs",

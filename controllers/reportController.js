@@ -42,10 +42,25 @@ const getLowStockReport = async (req, res) => {
 const getDisposalReport = async (req, res) => {
   try {
     const disposals = await Disposal.findAll({
-      include: [Item],
-      order: [['request_date', 'DESC']],
+      where: { disposal_status: 'Disposed' },
+      include: [{
+        model: Item,
+        attributes: ['item_id', 'item_code', 'item_name', 'unit_cost'],
+      }],
+      order: [['disposed_date', 'DESC']],
     });
-    res.status(200).json(disposals);
+
+    const valueWrittenOff = disposals.reduce((total, disposal) => {
+      return total + Number(disposal.Item?.unit_cost || 0);
+    }, 0);
+
+    res.status(200).json({
+      summary: {
+        disposed_items: disposals.length,
+        value_written_off: valueWrittenOff,
+      },
+      disposals,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch disposal report', error: error.message });
   }
@@ -78,9 +93,15 @@ const getLocationReport = async (req, res) => {
         [col('Item.location_id'), 'location_id'],
         [fn('COUNT', col('Item.item_id')), 'item_count'],
         [fn('SUM', col('Item.quantity')), 'total_quantity'],
+        [fn('SUM', col('Item.total_value')), 'total_value'],
       ],
-      include: [{ model: ItemLocation, attributes: ['location_name'] }],
-      group: ['Item.location_id', 'ItemLocation.location_id', 'ItemLocation.location_name'],
+      include: [{ model: ItemLocation, attributes: ['location_name', 'description'] }],
+      group: [
+        'Item.location_id',
+        'ItemLocation.location_id',
+        'ItemLocation.location_name',
+        'ItemLocation.description',
+      ],
     });
     res.status(200).json(results);
   } catch (error) {

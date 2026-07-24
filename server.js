@@ -36,10 +36,34 @@ app.use('/auth', authRoutes);
 
 const port = process.env.PORT || 3001;
 
+const connectDatabase = async () => {
+  const hosts = [...new Set([
+    process.env.DB_HOST,
+    process.env.DB_FALLBACK_HOST,
+  ].filter(Boolean))];
+
+  let lastError;
+  for (const host of hosts) {
+    sequelize.options.host = host;
+    sequelize.config.host = host;
+    sequelize.connectionManager.config.host = host;
+
+    try {
+      await sequelize.authenticate();
+      console.log(`Database connected successfully using ${host}!`);
+      return;
+    } catch (error) {
+      lastError = error;
+      console.log(`Database connection failed using ${host}: ${error.message}`);
+    }
+  }
+
+  throw lastError || new Error('No database host is configured');
+};
+
 const startServer = async () => {
   try {
-    await sequelize.authenticate();
-    console.log("Database connected successfully!");
+    await connectDatabase();
     app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);
     });

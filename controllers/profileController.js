@@ -25,15 +25,14 @@ const getProfile = async (req, res) => {
 const changePassword = async (req, res) => {
   try {
     const {
-      username,
       current_password,
       new_password,
       confirm_password,
     } = req.body;
 
-    if (!username || !current_password || !new_password || !confirm_password) {
+    if (!current_password || !new_password || !confirm_password) {
       return res.status(400).json({
-        message: 'username, current_password, new_password, and confirm_password are required',
+        message: 'current_password, new_password, and confirm_password are required',
       });
     }
 
@@ -50,10 +49,6 @@ const changePassword = async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    if (user.username !== username) {
-      return res.status(403).json({ message: 'Username does not match the signed-in user' });
-    }
-
     const isMatch = await bcrypt.compare(current_password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({ message: 'Current password is incorrect' });
@@ -61,9 +56,13 @@ const changePassword = async (req, res) => {
 
     const newHash = await bcrypt.hash(new_password, 10);
     user.password_hash = newHash;
+    user.token = null;
     await user.save();
 
-    res.status(200).json({ message: 'Password changed successfully' });
+    res.status(200).json({
+      message: 'Password changed successfully. Please sign in again.',
+      requires_reauthentication: true,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Failed to change password', error: error.message });
   }

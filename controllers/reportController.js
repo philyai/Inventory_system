@@ -5,6 +5,12 @@ const ItemLocation = require('../models/itemLocation');
 const ItemMovement = require('../models/itemMovement');
 const Disposal = require('../models/disposal');
 
+function isValidDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value);
+}
+
 // GET /reports/stock-summary
 const getStockSummary = async (req, res) => {
   try {
@@ -114,6 +120,18 @@ const getStockMovementReport = async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
     const where = {};
+
+    if (start_date && !isValidDate(start_date)) {
+      return res.status(400).json({ message: 'start_date must use YYYY-MM-DD format' });
+    }
+
+    if (end_date && !isValidDate(end_date)) {
+      return res.status(400).json({ message: 'end_date must use YYYY-MM-DD format' });
+    }
+
+    if (start_date && end_date && start_date > end_date) {
+      return res.status(400).json({ message: 'start_date must not be after end_date' });
+    }
 
     if (start_date && end_date) {
       where.movement_date = { [Op.between]: [start_date, end_date] };

@@ -1,5 +1,6 @@
 const Category = require('../models/category');
 const { Op } = require('sequelize');
+const { findFirst } = require('../utils/modelQueries');
 
 // GET all categories
 const getCategories = async (req, res) => {
@@ -27,7 +28,7 @@ const createCategory = async (req, res) => {
     }
 
     const normalizedName = category_name.trim();
-    const existing = await Category.findOne({ where: { category_name: normalizedName } });
+    const existing = await findFirst(Category, { where: { category_name: normalizedName } });
     if (existing) {
       return res.status(409).json({ message: 'A category with this name already exists' });
     }
@@ -41,25 +42,29 @@ const createCategory = async (req, res) => {
 
 const updateCategory = async (req, res) => {
   try {
-    const { id } = req.params;
+    const categoryId = Number(req.params.id);
     const { category_name, description } = req.body;
 
-    const category = await Category.findByPk(id);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return res.status(400).json({ message: 'A valid category id is required' });
+    }
+
+    const category = await Category.findByPk(categoryId);
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
     }
 
     const updates = {};
     if (category_name !== undefined) {
-      if (!category_name.trim()) {
+      if (typeof category_name !== 'string' || !category_name.trim()) {
         return res.status(400).json({ message: 'category_name cannot be empty' });
       }
 
       const normalizedName = category_name.trim();
-      const existing = await Category.findOne({
+      const existing = await findFirst(Category, {
         where: {
           category_name: normalizedName,
-          category_id: { [Op.ne]: id },
+          category_id: { [Op.ne]: categoryId },
         },
       });
       if (existing) {
@@ -68,6 +73,10 @@ const updateCategory = async (req, res) => {
       updates.category_name = normalizedName;
     }
     if (description !== undefined) updates.description = description;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: 'No category fields were provided' });
+    }
 
     await category.update(updates);
     res.status(200).json(category);
@@ -78,8 +87,12 @@ const updateCategory = async (req, res) => {
 
 const deleteCategory = async (req, res) => {
   try {
-    const { id } = req.params;
-    const category = await Category.findByPk(id);
+    const categoryId = Number(req.params.id);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      return res.status(400).json({ message: 'A valid category id is required' });
+    }
+
+    const category = await Category.findByPk(categoryId);
 
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });

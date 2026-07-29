@@ -5,6 +5,7 @@ const Notification = require('../models/notification');
 const sequelize = require('../models');
 const { Op, literal } = require('sequelize');
 const { calculateStatus } = require('./itemController');
+const { findFirst } = require('../utils/modelQueries');
 
 const attachApproverDetails = async disposals => {
   const approverIds = [
@@ -71,7 +72,7 @@ const createDisposal = async (req, res) => {
         throw error;
       }
 
-      const existingRequest = await Disposal.findOne({
+      const existingRequest = await findFirst(Disposal, {
         where: {
           item_id: normalizedItemId,
           disposal_status: { [Op.in]: ['Pending Approval', 'For Disposal'] },
@@ -85,7 +86,7 @@ const createDisposal = async (req, res) => {
         throw error;
       }
 
-      return Disposal.create({
+      const createdDisposal = await Disposal.create({
         item_id: normalizedItemId,
         requested_by: req.user.users_id,
         users_id: req.user.users_id,
@@ -93,20 +94,25 @@ const createDisposal = async (req, res) => {
         reason: normalizedReason,
         disposal_status: 'Pending Approval',
       }, { transaction });
-    });
 
-    const reviewers = await User.findAll({
-      where: { role: { [Op.in]: ['Purchasing', 'Admin IT'] } },
+      const reviewers = await User.findAll({
+        where: { role: { [Op.in]: ['Purchasing', 'Admin IT'] } },
+        attributes: ['users_id'],
+        transaction,
+      });
+      if (reviewers.length > 0) {
+        await Notification.bulkCreate(
+          reviewers.map(user => ({
+            user_id: user.users_id,
+            message: 'New disposal request submitted for review.',
+            type: 'disposal_requested',
+          })),
+          { transaction }
+        );
+      }
+
+      return createdDisposal;
     });
-    await Promise.all(
-      reviewers.map(user =>
-        Notification.create({
-          user_id: user.users_id,
-          message: 'New disposal request submitted for review.',
-          type: 'disposal_requested',
-        })
-      )
-    );
 
     res.status(201).json(disposal);
   } catch (error) {
@@ -131,6 +137,11 @@ const createDisposal = async (req, res) => {
 const getDisposals = async (req, res) => {
   try {
     const { status } = req.query;
+    const validStatuses = ['Pending Approval', 'For Disposal', 'Disposed', 'Rejected', 'Approved'];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ message: 'Invalid disposal status filter' });
+    }
+
     const where = {};
     if (status === 'Approved') {
       where.disposal_status = { [Op.in]: ['For Disposal', 'Disposed'] };
@@ -154,8 +165,12 @@ const getDisposals = async (req, res) => {
 // GET a single disposal by id
 const getDisposalById = async (req, res) => {
   try {
-    const { id } = req.params;
-    const disposal = await Disposal.findByPk(id, { include: [Item] });
+    const disposalId = Number(req.params.id);
+    if (!Number.isInteger(disposalId) || disposalId <= 0) {
+      return res.status(400).json({ message: 'A valid disposal id is required' });
+    }
+
+    const disposal = await Disposal.findByPk(disposalId, { include: [Item] });
 
     if (!disposal) {
       return res.status(404).json({ message: 'Disposal request not found' });
@@ -173,35 +188,54 @@ const updateDisposalStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { disposal_status } = req.body; // 'For Disposal' or 'Rejected'
+    const normalizedDisposalId = Number(id);
+
+    if (!Number.isInteger(normalizedDisposalId) || normalizedDisposalId <= 0) {
+      return res.status(400).json({ message: 'A valid disposal id is required' });
+    }
 
     if (!['For Disposal', 'Rejected'].includes(disposal_status)) {
       return res.status(400).json({ message: 'disposal_status must be For Disposal or Rejected' });
     }
 
-    const disposal = await Disposal.findByPk(id);
-    if (!disposal) {
-      return res.status(404).json({ message: 'Disposal request not found' });
-    }
-
-    if (disposal.disposal_status !== 'Pending Approval') {
-      return res.status(409).json({
-        message: 'Only pending disposal requests can be approved or rejected',
+    const disposal = await sequelize.transaction(async transaction => {
+      const lockedDisposal = await Disposal.findByPk(normalizedDisposalId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
       });
-    }
 
-    disposal.disposal_status = disposal_status;
-    disposal.approved_by = req.user.users_id;
-    disposal.approved_date = literal('SYSDATETIME()');
-    await disposal.save();
+      if (!lockedDisposal) {
+        const error = new Error('Disposal request not found');
+        error.status = 404;
+        throw error;
+      }
 
-    await Notification.create({
-      user_id: disposal.requested_by,
-      message: `Your disposal request was ${disposal_status === 'For Disposal' ? 'approved' : 'rejected'}.`,
-      type: disposal_status === 'For Disposal' ? 'disposal_approved' : 'disposal_rejected',
+      if (lockedDisposal.disposal_status !== 'Pending Approval') {
+        const error = new Error('Only pending disposal requests can be approved or rejected');
+        error.status = 409;
+        throw error;
+      }
+
+      await lockedDisposal.update({
+        disposal_status,
+        approved_by: req.user.users_id,
+        approved_date: literal('SYSDATETIME()'),
+      }, { transaction });
+
+      await Notification.create({
+        user_id: lockedDisposal.requested_by,
+        message: `Your disposal request was ${disposal_status === 'For Disposal' ? 'approved' : 'rejected'}.`,
+        type: disposal_status === 'For Disposal' ? 'disposal_approved' : 'disposal_rejected',
+      }, { transaction });
+
+      return lockedDisposal;
     });
 
     res.status(200).json(disposal);
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Failed to update disposal status', error: error.message });
   }
 };
@@ -210,30 +244,85 @@ const updateDisposalStatus = async (req, res) => {
 const finalizeDisposal = async (req, res) => {
   try {
     const { id } = req.params;
+    const normalizedDisposalId = Number(id);
 
-    const disposal = await Disposal.findByPk(id);
-    if (!disposal) {
-      return res.status(404).json({ message: 'Disposal request not found' });
+    if (!Number.isInteger(normalizedDisposalId) || normalizedDisposalId <= 0) {
+      return res.status(400).json({ message: 'A valid disposal id is required' });
     }
 
-    if (disposal.disposal_status !== 'For Disposal') {
-      return res.status(400).json({ message: 'Only items in For Disposal status can be finalized' });
-    }
+    const disposal = await sequelize.transaction(async transaction => {
+      const lockedDisposal = await Disposal.findByPk(normalizedDisposalId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-    const item = await Item.findByPk(disposal.item_id);
-    if (item) {
-      const newQuantity = Math.max(item.quantity - 1, 0);
-      const newStatus = calculateStatus(newQuantity, item.reorder_level);
-      await item.update({ quantity: newQuantity, status: newStatus });
-    }
+      if (!lockedDisposal) {
+        const error = new Error('Disposal request not found');
+        error.status = 404;
+        throw error;
+      }
 
-    disposal.disposal_status = 'Disposed';
-    disposal.disposed_by = req.user.users_id;
-    disposal.disposed_date = literal('GETDATE()');
-    await disposal.save();
+      if (lockedDisposal.disposal_status !== 'For Disposal') {
+        const error = new Error('Only items in For Disposal status can be finalized');
+        error.status = 409;
+        throw error;
+      }
+
+      const item = await Item.findByPk(lockedDisposal.item_id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!item) {
+        const error = new Error('The item for this disposal request no longer exists');
+        error.status = 409;
+        throw error;
+      }
+
+      const newQuantity = Math.max(Number(item.quantity) - 1, 0);
+      const newStatus = calculateStatus(newQuantity, Number(item.reorder_level));
+      await item.update(
+        {
+          quantity: newQuantity,
+          status: newStatus,
+          total_value: newQuantity * Number(item.unit_cost),
+        },
+        { transaction }
+      );
+
+      await lockedDisposal.update({
+        disposal_status: 'Disposed',
+        disposed_by: req.user.users_id,
+        disposed_date: literal('SYSDATETIME()'),
+      }, { transaction });
+
+      await Notification.create({
+        user_id: lockedDisposal.requested_by,
+        message: 'Your approved disposal request has been finalized.',
+        type: 'disposal_completed',
+      }, { transaction });
+
+      return lockedDisposal;
+    });
 
     res.status(200).json(disposal);
   } catch (error) {
+    console.error('Finalize disposal error:', error);
+
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
+
+    if ([
+      'SequelizeConnectionError',
+      'SequelizeConnectionAcquireTimeoutError',
+      'SequelizeHostNotFoundError',
+      'SequelizeHostNotReachableError',
+    ].includes(error.name)) {
+      return res.status(503).json({
+        message: 'Database temporarily unavailable. Please try again shortly.',
+      });
+    }
+
     res.status(500).json({ message: 'Failed to finalize disposal', error: error.message });
   }
 };

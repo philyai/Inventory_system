@@ -1,4 +1,4 @@
-const { fn, col, literal } = require('sequelize');
+const { fn, col, Op } = require('sequelize');
 const Item = require('../models/item');
 const Category = require('../models/category');
 const Disposal = require('../models/disposal');
@@ -12,7 +12,7 @@ const getSummary = async (req, res) => {
     const itemsInStock = await Item.sum('quantity', { where: { status: 'In Stock' } });
     const lowStockCount = await Item.count({ where: { status: 'Low Stock' } });
     const forDisposalCount = await Disposal.count({
-      where: { disposal_status: 'Pending Approval' },
+      where: { disposal_status: { [Op.in]: ['Pending Approval', 'For Disposal'] } },
     });
     const reservedCount = await Item.count({ where: { status: 'Reserved' } });
 

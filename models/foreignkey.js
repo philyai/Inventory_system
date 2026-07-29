@@ -5,6 +5,7 @@ const ItemMovement = require('./itemMovement');
 const ItemOtherDetails = require('./itemOtherDetails');
 const Disposal = require('./disposal');
 const User = require('./user');
+const LoginSession = require('./loginSession');
 
 // Items belongs to Category / Location
 Item.belongsTo(Category, { foreignKey: 'category_id' });
@@ -25,6 +26,9 @@ Item.hasMany(ItemOtherDetails, { foreignKey: 'Item_Id' });
 Disposal.belongsTo(Item, { foreignKey: 'item_id' });
 Item.hasMany(Disposal, { foreignKey: 'item_id' });
 
+LoginSession.belongsTo(User, { foreignKey: 'users_id' });
+User.hasMany(LoginSession, { foreignKey: 'users_id' });
+
 module.exports = {
-  Category, ItemLocation, Item, ItemMovement, ItemOtherDetails, Disposal, User,
+  Category, ItemLocation, Item, ItemMovement, ItemOtherDetails, Disposal, User, LoginSession,
 };

@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const { Op, literal } = require('sequelize');
 const User = require('../models/user');
+const { findFirst } = require('../utils/modelQueries');
 
 const ACCOUNT_ROLES = ['Admin IT', 'IT', 'Purchasing'];
 
@@ -30,9 +31,18 @@ const changePassword = async (req, res) => {
       confirm_password,
     } = req.body;
 
-    if (!current_password || !new_password || !confirm_password) {
+    if (
+      typeof username !== 'string' ||
+      typeof current_password !== 'string' ||
+      typeof new_password !== 'string' ||
+      typeof confirm_password !== 'string' ||
+      !username.trim() ||
+      !current_password ||
+      !new_password ||
+      !confirm_password
+    ) {
       return res.status(400).json({
-        message: 'current_password, new_password, and confirm_password are required',
+        message: 'username, current_password, new_password, and confirm_password are required',
       });
     }
 
@@ -47,6 +57,10 @@ const changePassword = async (req, res) => {
     const user = await User.findByPk(req.user.users_id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (user.username !== username.trim()) {
+      return res.status(403).json({ message: 'Username does not match the signed-in user' });
     }
 
     const isMatch = await bcrypt.compare(current_password, user.password_hash);
@@ -99,7 +113,7 @@ const addAccount = async (req, res) => {
 
     const normalizedUsername = username.trim();
     const normalizedEmail = email.trim().toLowerCase();
-    const existingUser = await User.findOne({
+    const existingUser = await findFirst(User, {
       where: {
         [Op.or]: [
           { username: normalizedUsername },

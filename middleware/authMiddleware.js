@@ -20,7 +20,12 @@ const verifyToken = async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid or expired session' });
     }
 
-    req.user = { users_id: user.users_id, username: user.username, role: user.role };
+    req.user = {
+      users_id: user.users_id,
+      username: user.username,
+      role: user.role,
+      login_session_id: decoded.login_session_id,
+    };
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid or expired token' });

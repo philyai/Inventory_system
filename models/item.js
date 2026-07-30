@@ -18,6 +18,7 @@ const Item = sequelize.define('Item', {
   status: DataTypes.STRING,
   image_url: DataTypes.TEXT,
   created_by: DataTypes.INTEGER,
+  client_request_id: { type: DataTypes.STRING(100), allowNull: true },
   date_added: DataTypes.DATE,
 }, {
   tableName: 'Items',

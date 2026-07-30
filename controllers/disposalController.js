@@ -284,7 +284,6 @@ const finalizeDisposal = async (req, res) => {
         {
           quantity: newQuantity,
           status: newStatus,
-          total_value: newQuantity * Number(item.unit_cost),
         },
         { transaction }
       );

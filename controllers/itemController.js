@@ -10,6 +10,7 @@ const { findFirst } = require('../utils/modelQueries');
 
 const recentItemSubmissions = new Map();
 const ITEM_SUBMISSION_TTL_MS = 30 * 1000;
+const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/;
 
 function rememberItemSubmission(key, item) {
   const record = {
@@ -242,9 +243,7 @@ const updateItem = async (req, res) => {
 
     const nextQuantity = updates.quantity ?? Number(item.quantity);
     const nextReorderLevel = updates.reorder_level ?? Number(item.reorder_level);
-    const nextUnitCost = updates.unit_cost ?? Number(item.unit_cost);
     updates.status = calculateStatus(nextQuantity, nextReorderLevel);
-    updates.total_value = nextQuantity * nextUnitCost;
 
     if (req.file) {
       updates.image_url = `/uploads/items/${req.file.filename}`;
@@ -337,6 +336,7 @@ const uploadItemImage = async (req, res) => {
 // POST create new item
 const createItem = async (req, res) => {
   let submissionKey;
+  let clientRequestId;
 
   try {
     const {
@@ -387,6 +387,32 @@ const createItem = async (req, res) => {
 
     if (!Number.isFinite(normalizedUnitCost) || normalizedUnitCost < 0) {
       return rejectUploadedRequest(res, req.file, 400, 'unit_cost must be a non-negative number');
+    }
+
+    const suppliedClientRequestId = req.get('Idempotency-Key');
+    if (suppliedClientRequestId) {
+      clientRequestId = suppliedClientRequestId.trim();
+      if (!CLIENT_REQUEST_ID_PATTERN.test(clientRequestId)) {
+        return rejectUploadedRequest(
+          res,
+          req.file,
+          400,
+          'Idempotency-Key must be 1 to 100 characters using letters, numbers, dot, underscore, colon, or hyphen'
+        );
+      }
+
+      const existingItem = await Item.findOne({
+        where: {
+          created_by: req.user.users_id,
+          client_request_id: clientRequestId,
+        },
+      });
+
+      if (existingItem) {
+        await removeDuplicateUpload(req.file);
+        res.set('Idempotent-Replayed', 'true');
+        return res.status(200).json(existingItem);
+      }
     }
 
     submissionKey = getItemSubmissionKey(req);
@@ -448,12 +474,31 @@ const createItem = async (req, res) => {
         category_id: resolvedCategoryId, location_id: normalizedLocationId,
         quantity: normalizedQuantity, reorder_level: normalizedReorderLevel,
         unit_cost: normalizedUnitCost,
-        total_value: normalizedQuantity * normalizedUnitCost,
         status: itemStatus,
         image_url: req.file ? `/uploads/items/${req.file.filename}` : null,
         created_by: req.user.users_id,
+        client_request_id: clientRequestId || null,
         date_added: new Date(),
-      }, { transaction });
+      }, {
+        fields: [
+          'item_code',
+          'item_name',
+          'brand',
+          'model',
+          'serial_number',
+          'category_id',
+          'location_id',
+          'quantity',
+          'reorder_level',
+          'unit_cost',
+          'status',
+          'image_url',
+          'created_by',
+          'client_request_id',
+          'date_added',
+        ],
+        transaction,
+      });
     });
 
     rememberItemSubmission(submissionKey, newItem.toJSON());
@@ -463,6 +508,22 @@ const createItem = async (req, res) => {
     if (submissionKey) {
       recentItemSubmissions.delete(submissionKey);
     }
+
+    if (clientRequestId && error.name === 'SequelizeUniqueConstraintError') {
+      const existingItem = await Item.findOne({
+        where: {
+          created_by: req.user.users_id,
+          client_request_id: clientRequestId,
+        },
+      });
+
+      if (existingItem) {
+        await removeDuplicateUpload(req.file);
+        res.set('Idempotent-Replayed', 'true');
+        return res.status(200).json(existingItem);
+      }
+    }
+
     await removeDuplicateUpload(req.file);
 
     console.error('Create item error:', error);

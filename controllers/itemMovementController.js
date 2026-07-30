@@ -71,7 +71,6 @@ const createMovement = async (req, res) => {
       await item.update({
         quantity: newQuantity,
         status: newStatus,
-        total_value: newQuantity * Number(item.unit_cost),
       }, { transaction });
 
       return { movement, updated_quantity: newQuantity, updated_status: newStatus };

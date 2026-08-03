@@ -2,6 +2,7 @@ const Item = require('../models/item');
 const Category = require('../models/category');
 const ItemLocation = require('../models/itemLocation');
 const Disposal = require('../models/disposal');
+const ItemRemarkIssue = require('../models/itemRemarkIssue');
 const sequelize = require('../models/index');
 const { Op, fn, col, where } = require('sequelize');
 const crypto = require('crypto');
@@ -11,6 +12,20 @@ const { findFirst } = require('../utils/modelQueries');
 const recentItemSubmissions = new Map();
 const ITEM_SUBMISSION_TTL_MS = 30 * 1000;
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/;
+const ITEM_REMARKS_MAX_LENGTH = 500;
+
+const remarkIssueInclude = {
+  model: ItemRemarkIssue,
+  as: 'remark_issue',
+  attributes: [
+    'issue_id',
+    'issue_code',
+    'remarks',
+    'created_by',
+    'created_date',
+    'updated_date',
+  ],
+};
 
 function rememberItemSubmission(key, item) {
   const record = {
@@ -45,6 +60,7 @@ function getItemSubmissionKey(req) {
     quantity: req.body.quantity,
     reorder_level: req.body.reorder_level,
     unit_cost: req.body.unit_cost,
+    remarks: req.body.remarks,
     file_name: req.file?.originalname,
     file_size: req.file?.size,
   };
@@ -121,9 +137,13 @@ async function generateItemCode(category_id, transaction) {
 // GET all items
 const getItems = async (req, res) => {
   try {
-    const { search, category_id } = req.query;
+    const { search, category_id, has_remarks } = req.query;
 
     const where = {};
+
+    if (has_remarks !== undefined && has_remarks !== 'true') {
+      return res.status(400).json({ message: 'has_remarks must be true when provided' });
+    }
 
     if (search) {
       where[Op.or] = [
@@ -142,9 +162,17 @@ const getItems = async (req, res) => {
         Category,
         ItemLocation,
         {
+          ...remarkIssueInclude,
+          required: has_remarks === 'true',
+          ...(has_remarks === 'true'
+            ? { where: { remarks: { [Op.ne]: '' } } }
+            : {}),
+        },
+        {
           model: Disposal,
           attributes: [
             'disposal_id',
+            'disposal_quantity',
             'reason',
             'disposal_status',
             'request_date',
@@ -187,6 +215,23 @@ const updateItem = async (req, res) => {
     }
 
     const updates = {};
+    let normalizedRemarks;
+    if (req.body.remarks !== undefined) {
+      if (typeof req.body.remarks !== 'string') {
+        return rejectUploadedRequest(res, req.file, 400, 'remarks must be a string');
+      }
+
+      normalizedRemarks = req.body.remarks.trim();
+      if (normalizedRemarks.length > ITEM_REMARKS_MAX_LENGTH) {
+        return rejectUploadedRequest(
+          res,
+          req.file,
+          400,
+          `remarks must not exceed ${ITEM_REMARKS_MAX_LENGTH} characters`
+        );
+      }
+    }
+
     for (const field of ['item_code', 'brand', 'model', 'serial_number']) {
       if (req.body[field] !== undefined) updates[field] = req.body[field];
     }
@@ -249,12 +294,64 @@ const updateItem = async (req, res) => {
       updates.image_url = `/uploads/items/${req.file.filename}`;
     }
 
-    await item.update(updates);
+    const updatedItem = await sequelize.transaction(async transaction => {
+      const lockedItem = await Item.findByPk(itemId, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-    res.status(200).json(item);
+      if (!lockedItem) {
+        const error = new Error('Item not found');
+        error.status = 404;
+        throw error;
+      }
+
+      await lockedItem.update(updates, { transaction });
+
+      let remarkIssue = await ItemRemarkIssue.findOne({
+        where: { item_id: itemId },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      if (normalizedRemarks !== undefined) {
+        if (remarkIssue) {
+          await remarkIssue.update({
+            remarks: normalizedRemarks,
+            updated_date: fn('GETDATE'),
+          }, { transaction });
+        } else if (normalizedRemarks) {
+          remarkIssue = await ItemRemarkIssue.create({
+            item_id: itemId,
+            remarks: normalizedRemarks,
+            created_by: req.user.users_id,
+            created_date: fn('GETDATE'),
+            updated_date: fn('GETDATE'),
+          }, {
+            fields: [
+              'item_id',
+              'remarks',
+              'created_by',
+              'created_date',
+              'updated_date',
+            ],
+            transaction,
+          });
+        }
+      }
+
+      const responseItem = lockedItem.toJSON();
+      responseItem.remark_issue = remarkIssue ? remarkIssue.toJSON() : null;
+      return responseItem;
+    });
+
+    res.status(200).json(updatedItem);
   } catch (error) {
     await removeDuplicateUpload(req.file);
-    res.status(500).json({ message: 'Failed to update item', error: error.message });
+    res.status(error.status || 500).json({
+      message: error.status ? error.message : 'Failed to update item',
+      error: error.message,
+    });
   }
 };
 
@@ -293,7 +390,7 @@ const getItemById = async (req, res) => {
     }
 
     const item = await Item.findByPk(itemId, {
-      include: [Category, ItemLocation],
+      include: [Category, ItemLocation, remarkIssueInclude],
     });
     if (!item) {
       return res.status(404).json({ message: 'Item not found' });
@@ -342,13 +439,27 @@ const createItem = async (req, res) => {
     const {
       item_name, brand, model, serial_number,
       category_id, category_name, location_id, quantity, reorder_level,
-      unit_cost
+      unit_cost, remarks
     } = req.body;
     const normalizedItemName = typeof item_name === 'string' ? item_name.trim() : '';
     const normalizedQuantity = Number(quantity);
     const normalizedReorderLevel = Number(reorder_level);
     const normalizedUnitCost = Number(unit_cost);
     const normalizedLocationId = Number(location_id);
+    const normalizedRemarks = typeof remarks === 'string' ? remarks.trim() : '';
+
+    if (remarks !== undefined && typeof remarks !== 'string') {
+      return rejectUploadedRequest(res, req.file, 400, 'remarks must be a string');
+    }
+
+    if (normalizedRemarks.length > ITEM_REMARKS_MAX_LENGTH) {
+      return rejectUploadedRequest(
+        res,
+        req.file,
+        400,
+        `remarks must not exceed ${ITEM_REMARKS_MAX_LENGTH} characters`
+      );
+    }
 
     const normalizedCategoryName =
       typeof category_name === 'string' ? category_name.trim() : '';
@@ -406,6 +517,7 @@ const createItem = async (req, res) => {
           created_by: req.user.users_id,
           client_request_id: clientRequestId,
         },
+        include: [remarkIssueInclude],
       });
 
       if (existingItem) {
@@ -432,7 +544,7 @@ const createItem = async (req, res) => {
 
     rememberItemSubmission(submissionKey, null);
 
-    const newItem = await sequelize.transaction(async (transaction) => {
+    const createdItem = await sequelize.transaction(async (transaction) => {
       let resolvedCategoryId = category_id;
       const location = await ItemLocation.findByPk(normalizedLocationId, { transaction });
       if (!location) {
@@ -469,7 +581,7 @@ const createItem = async (req, res) => {
       const item_code = await generateItemCode(resolvedCategoryId, transaction);
       const itemStatus = calculateStatus(normalizedQuantity, normalizedReorderLevel);
 
-      return Item.create({
+      const item = await Item.create({
         item_code, item_name: normalizedItemName, brand, model, serial_number,
         category_id: resolvedCategoryId, location_id: normalizedLocationId,
         quantity: normalizedQuantity, reorder_level: normalizedReorderLevel,
@@ -499,11 +611,35 @@ const createItem = async (req, res) => {
         ],
         transaction,
       });
+
+      let remarkIssue = null;
+      if (normalizedRemarks) {
+        remarkIssue = await ItemRemarkIssue.create({
+          item_id: item.item_id,
+          remarks: normalizedRemarks,
+          created_by: req.user.users_id,
+          created_date: fn('GETDATE'),
+          updated_date: fn('GETDATE'),
+        }, {
+          fields: [
+            'item_id',
+            'remarks',
+            'created_by',
+            'created_date',
+            'updated_date',
+          ],
+          transaction,
+        });
+      }
+
+      const responseItem = item.toJSON();
+      responseItem.remark_issue = remarkIssue ? remarkIssue.toJSON() : null;
+      return responseItem;
     });
 
-    rememberItemSubmission(submissionKey, newItem.toJSON());
+    rememberItemSubmission(submissionKey, createdItem);
 
-    res.status(201).json(newItem);
+    res.status(201).json(createdItem);
   } catch (error) {
     if (submissionKey) {
       recentItemSubmissions.delete(submissionKey);
@@ -515,6 +651,7 @@ const createItem = async (req, res) => {
           created_by: req.user.users_id,
           client_request_id: clientRequestId,
         },
+        include: [remarkIssueInclude],
       });
 
       if (existingItem) {

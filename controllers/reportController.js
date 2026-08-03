@@ -56,13 +56,19 @@ const getDisposalReport = async (req, res) => {
       order: [['disposed_date', 'DESC']],
     });
 
+    const disposedItems = disposals.reduce(
+      (total, disposal) => total + Number(disposal.disposal_quantity || 0),
+      0
+    );
     const valueWrittenOff = disposals.reduce((total, disposal) => {
-      return total + Number(disposal.Item?.unit_cost || 0);
+      return total
+        + (Number(disposal.disposal_quantity || 0) * Number(disposal.Item?.unit_cost || 0));
     }, 0);
 
     res.status(200).json({
       summary: {
-        disposed_items: disposals.length,
+        disposed_items: disposedItems,
+        disposal_requests: disposals.length,
         value_written_off: valueWrittenOff,
       },
       disposals,

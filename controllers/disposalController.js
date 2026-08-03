@@ -38,12 +38,19 @@ const attachApproverDetails = async disposals => {
 // POST create a disposal request (IT/Admin IT action)
 const createDisposal = async (req, res) => {
   try {
-    const { item_id, reason } = req.body;
+    const { item_id, disposal_quantity, reason } = req.body;
     const normalizedItemId = Number(item_id);
+    const normalizedDisposalQuantity = Number(disposal_quantity);
     const normalizedReason = typeof reason === 'string' ? reason.trim() : '';
 
     if (!Number.isInteger(normalizedItemId) || normalizedItemId <= 0) {
       return res.status(400).json({ message: 'A valid item_id is required' });
+    }
+
+    if (!Number.isInteger(normalizedDisposalQuantity) || normalizedDisposalQuantity <= 0) {
+      return res.status(400).json({
+        message: 'disposal_quantity must be a positive integer',
+      });
     }
 
     if (!normalizedReason) {
@@ -72,6 +79,12 @@ const createDisposal = async (req, res) => {
         throw error;
       }
 
+      if (normalizedDisposalQuantity > Number(item.quantity)) {
+        const error = new Error('disposal_quantity cannot exceed the available item quantity');
+        error.status = 400;
+        throw error;
+      }
+
       const existingRequest = await findFirst(Disposal, {
         where: {
           item_id: normalizedItemId,
@@ -88,6 +101,7 @@ const createDisposal = async (req, res) => {
 
       const createdDisposal = await Disposal.create({
         item_id: normalizedItemId,
+        disposal_quantity: normalizedDisposalQuantity,
         requested_by: req.user.users_id,
         users_id: req.user.users_id,
         request_date: literal('SYSDATETIME()'),
@@ -278,7 +292,22 @@ const finalizeDisposal = async (req, res) => {
         throw error;
       }
 
-      const newQuantity = Math.max(Number(item.quantity) - 1, 0);
+      const disposalQuantity = Number(lockedDisposal.disposal_quantity);
+      if (!Number.isInteger(disposalQuantity) || disposalQuantity <= 0) {
+        const error = new Error('The disposal request has an invalid disposal quantity');
+        error.status = 409;
+        throw error;
+      }
+
+      if (disposalQuantity > Number(item.quantity)) {
+        const error = new Error(
+          'The available item quantity is lower than the approved disposal quantity'
+        );
+        error.status = 409;
+        throw error;
+      }
+
+      const newQuantity = Number(item.quantity) - disposalQuantity;
       const newStatus = calculateStatus(newQuantity, Number(item.reorder_level));
       await item.update(
         {

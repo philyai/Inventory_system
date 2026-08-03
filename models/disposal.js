@@ -4,6 +4,12 @@ const sequelize = require('./index');
 const Disposal = sequelize.define('Disposal', {
   disposal_id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   item_id: DataTypes.INTEGER,
+  disposal_quantity: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 1,
+    validate: { min: 1 },
+  },
   requested_by: DataTypes.INTEGER,
   request_date: DataTypes.DATE,
   reason: DataTypes.STRING,

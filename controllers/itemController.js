@@ -3,16 +3,21 @@ const Category = require('../models/category');
 const ItemLocation = require('../models/itemLocation');
 const Disposal = require('../models/disposal');
 const ItemRemarkIssue = require('../models/itemRemarkIssue');
+const ItemMovement = require('../models/itemMovement');
 const sequelize = require('../models/index');
 const { Op, fn, col, where } = require('sequelize');
 const crypto = require('crypto');
 const fs = require('fs/promises');
+const path = require('path');
 const { findFirst } = require('../utils/modelQueries');
+const { sendServerError } = require('../utils/httpError');
 
 const recentItemSubmissions = new Map();
 const ITEM_SUBMISSION_TTL_MS = 30 * 1000;
 const CLIENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/;
 const ITEM_REMARKS_MAX_LENGTH = 500;
+const ITEM_TEXT_MAX_LENGTH = 255;
+const MAX_PAGE_SIZE = 20;
 
 const remarkIssueInclude = {
   model: ItemRemarkIssue,
@@ -83,6 +88,22 @@ async function removeDuplicateUpload(file) {
   }
 }
 
+async function removeStoredItemImage(imageUrl) {
+  const prefix = '/uploads/items/';
+  if (typeof imageUrl !== 'string' || !imageUrl.startsWith(prefix)) return;
+
+  const fileName = imageUrl.slice(prefix.length);
+  if (!fileName || path.basename(fileName) !== fileName) return;
+
+  try {
+    await fs.unlink(path.join(__dirname, '..', 'uploads', 'items', fileName));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error(`Failed to remove stored item image: ${error.name || 'Error'}`);
+    }
+  }
+}
+
 async function rejectUploadedRequest(res, file, status, message) {
   await removeDuplicateUpload(file);
   return res.status(status).json({ message });
@@ -92,6 +113,42 @@ function calculateStatus(quantity, reorderLevel) {
   if (quantity <= 0) return 'Out of Stock';
   if (quantity <= reorderLevel) return 'Low Stock';
   return 'In Stock';
+}
+
+function formatIssueCode(issueId) {
+  return `ISS-${String(issueId).padStart(6, '0')}`;
+}
+
+function movementTypeForQuantityChange(quantityChange) {
+  if (quantityChange > 0) return 'In';
+  if (quantityChange < 0) return 'Out';
+  return null;
+}
+
+async function createRemarkIssue({ itemId, remarks, createdBy, transaction }) {
+  const remarkIssue = await ItemRemarkIssue.create({
+    issue_code: `TMP-${crypto.randomBytes(10).toString('hex')}`,
+    item_id: itemId,
+    remarks,
+    created_by: createdBy,
+    created_date: fn('GETDATE'),
+    updated_date: fn('GETDATE'),
+  }, {
+    fields: [
+      'issue_code',
+      'item_id',
+      'remarks',
+      'created_by',
+      'created_date',
+      'updated_date',
+    ],
+    transaction,
+  });
+
+  await remarkIssue.update({
+    issue_code: formatIssueCode(remarkIssue.issue_id),
+  }, { transaction });
+  return remarkIssue;
 }
 
 function getCategoryPrefix(categoryName) {
@@ -137,7 +194,27 @@ async function generateItemCode(category_id, transaction) {
 // GET all items
 const getItems = async (req, res) => {
   try {
-    const { search, category_id, has_remarks } = req.query;
+    const { search, category_id, has_remarks, page, limit } = req.query;
+    const paginationRequested = page !== undefined || limit !== undefined;
+    const pageNumber = page === undefined ? 1 : Number(page);
+    const pageSize = limit === undefined ? MAX_PAGE_SIZE : Number(limit);
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageNumber) || pageNumber < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' });
+    }
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE)) {
+      return res.status(400).json({
+        message: `limit must be an integer between 1 and ${MAX_PAGE_SIZE}`,
+      });
+    }
+
+    const offset = (pageNumber - 1) * pageSize;
+    if (paginationRequested && !Number.isSafeInteger(offset)) {
+      return res.status(400).json({ message: 'page is too large' });
+    }
 
     const where = {};
 
@@ -158,6 +235,10 @@ const getItems = async (req, res) => {
 
     const items = await Item.findAll({
       where,
+      order: [['date_added', 'DESC'], ['item_id', 'DESC']],
+      ...(paginationRequested
+        ? { limit: pageSize + 1, offset }
+        : {}),
       include: [
         Category,
         ItemLocation,
@@ -183,7 +264,9 @@ const getItems = async (req, res) => {
       ],
     });
 
-    const visibleItems = items
+    const hasMore = paginationRequested && items.length > pageSize;
+    const pageItems = paginationRequested ? items.slice(0, pageSize) : items;
+    const visibleItems = pageItems
       .map(item => {
         const itemData = item.toJSON();
         const activeDisposal = itemData.Disposals.find(disposal =>
@@ -195,9 +278,17 @@ const getItems = async (req, res) => {
         return itemData;
       });
 
+    if (paginationRequested) {
+      res.set({
+        'X-Page': String(pageNumber),
+        'X-Page-Size': String(pageSize),
+        'X-Has-More': String(hasMore),
+      });
+    }
+
     res.status(200).json(visibleItems);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch items', error: error.message });
+    sendServerError(res, 'Failed to fetch items', error);
   }
 };
 
@@ -207,11 +298,6 @@ const updateItem = async (req, res) => {
     const itemId = Number(req.params.id);
     if (!Number.isInteger(itemId) || itemId <= 0) {
       return rejectUploadedRequest(res, req.file, 400, 'A valid item id is required');
-    }
-
-    const item = await Item.findByPk(itemId);
-    if (!item) {
-      return rejectUploadedRequest(res, req.file, 404, 'Item not found');
     }
 
     const updates = {};
@@ -232,14 +318,32 @@ const updateItem = async (req, res) => {
       }
     }
 
-    for (const field of ['item_code', 'brand', 'model', 'serial_number']) {
-      if (req.body[field] !== undefined) updates[field] = req.body[field];
+    for (const field of ['brand', 'model', 'serial_number']) {
+      if (req.body[field] !== undefined) {
+        if (typeof req.body[field] !== 'string' || req.body[field].length > ITEM_TEXT_MAX_LENGTH) {
+          return rejectUploadedRequest(
+            res,
+            req.file,
+            400,
+            `${field} must be a string of at most ${ITEM_TEXT_MAX_LENGTH} characters`
+          );
+        }
+        updates[field] = req.body[field].trim() || null;
+      }
     }
 
     if (req.body.item_name !== undefined) {
       const itemName = typeof req.body.item_name === 'string' ? req.body.item_name.trim() : '';
       if (!itemName) {
         return rejectUploadedRequest(res, req.file, 400, 'item_name cannot be empty');
+      }
+      if (itemName.length > ITEM_TEXT_MAX_LENGTH) {
+        return rejectUploadedRequest(
+          res,
+          req.file,
+          400,
+          `item_name must not exceed ${ITEM_TEXT_MAX_LENGTH} characters`
+        );
       }
       updates.item_name = itemName;
     }
@@ -286,15 +390,11 @@ const updateItem = async (req, res) => {
       }
     }
 
-    const nextQuantity = updates.quantity ?? Number(item.quantity);
-    const nextReorderLevel = updates.reorder_level ?? Number(item.reorder_level);
-    updates.status = calculateStatus(nextQuantity, nextReorderLevel);
-
     if (req.file) {
       updates.image_url = `/uploads/items/${req.file.filename}`;
     }
 
-    const updatedItem = await sequelize.transaction(async transaction => {
+    const updateResult = await sequelize.transaction(async transaction => {
       const lockedItem = await Item.findByPk(itemId, {
         transaction,
         lock: transaction.LOCK.UPDATE,
@@ -304,6 +404,27 @@ const updateItem = async (req, res) => {
         const error = new Error('Item not found');
         error.status = 404;
         throw error;
+      }
+      const previousQuantity = Number(lockedItem.quantity);
+      const replacedImageUrl = req.file ? lockedItem.image_url : null;
+      const nextQuantity = updates.quantity ?? previousQuantity;
+      const nextReorderLevel = updates.reorder_level ?? Number(lockedItem.reorder_level);
+      updates.status = calculateStatus(nextQuantity, nextReorderLevel);
+
+      const quantityChange = nextQuantity - previousQuantity;
+      if (quantityChange !== 0) {
+        const movementType = movementTypeForQuantityChange(quantityChange);
+        await ItemMovement.create({
+          item_id: itemId,
+          movement_type: movementType,
+          quantity_change: quantityChange,
+          source_destination: 'Item edit',
+          remarks: quantityChange > 0
+            ? 'Stock increased while editing item details'
+            : 'Stock decreased while editing item details',
+          processed_by: req.user.users_id,
+          movement_date: new Date(),
+        }, { transaction });
       }
 
       await lockedItem.update(updates, { transaction });
@@ -321,20 +442,10 @@ const updateItem = async (req, res) => {
             updated_date: fn('GETDATE'),
           }, { transaction });
         } else if (normalizedRemarks) {
-          remarkIssue = await ItemRemarkIssue.create({
-            item_id: itemId,
+          remarkIssue = await createRemarkIssue({
+            itemId,
             remarks: normalizedRemarks,
-            created_by: req.user.users_id,
-            created_date: fn('GETDATE'),
-            updated_date: fn('GETDATE'),
-          }, {
-            fields: [
-              'item_id',
-              'remarks',
-              'created_by',
-              'created_date',
-              'updated_date',
-            ],
+            createdBy: req.user.users_id,
             transaction,
           });
         }
@@ -342,16 +453,20 @@ const updateItem = async (req, res) => {
 
       const responseItem = lockedItem.toJSON();
       responseItem.remark_issue = remarkIssue ? remarkIssue.toJSON() : null;
-      return responseItem;
+      return {
+        responseItem,
+        replacedImageUrl,
+      };
     });
 
-    res.status(200).json(updatedItem);
+    await removeStoredItemImage(updateResult.replacedImageUrl);
+    res.status(200).json(updateResult.responseItem);
   } catch (error) {
     await removeDuplicateUpload(req.file);
-    res.status(error.status || 500).json({
-      message: error.status ? error.message : 'Failed to update item',
-      error: error.message,
-    });
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
+    }
+    sendServerError(res, 'Failed to update item', error);
   }
 };
 
@@ -368,7 +483,9 @@ const deleteItem = async (req, res) => {
       return res.status(404).json({ message: 'Item not found' });
     }
 
+    const removedImageUrl = item.image_url;
     await item.destroy();
+    await removeStoredItemImage(removedImageUrl);
 
     res.status(200).json({ message: 'Item deleted successfully' });
   } catch (error) {
@@ -377,7 +494,7 @@ const deleteItem = async (req, res) => {
         message: 'Cannot delete this item because it has related movement, disposal, or other records. Remove those first.',
       });
     }
-    res.status(500).json({ message: 'Failed to delete item', error: error.message });
+    sendServerError(res, 'Failed to delete item', error);
   }
 };
 
@@ -397,7 +514,7 @@ const getItemById = async (req, res) => {
     }
     res.status(200).json(item);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch item', error: error.message });
+    sendServerError(res, 'Failed to fetch item', error);
   }
 };
 
@@ -420,13 +537,15 @@ const uploadItemImage = async (req, res) => {
       return rejectUploadedRequest(res, req.file, 404, 'Item not found');
     }
 
+    const replacedImageUrl = item.image_url;
     item.image_url = `/uploads/items/${req.file.filename}`;
     await item.save();
+    await removeStoredItemImage(replacedImageUrl);
 
     res.status(200).json(item);
   } catch (error) {
     await removeDuplicateUpload(req.file);
-    res.status(500).json({ message: 'Failed to upload item image', error: error.message });
+    sendServerError(res, 'Failed to upload item image', error);
   }
 };
 
@@ -447,6 +566,23 @@ const createItem = async (req, res) => {
     const normalizedUnitCost = Number(unit_cost);
     const normalizedLocationId = Number(location_id);
     const normalizedRemarks = typeof remarks === 'string' ? remarks.trim() : '';
+    const normalizedOptionalText = {};
+
+    for (const [field, value] of Object.entries({ brand, model, serial_number })) {
+      if (value !== undefined && value !== null && typeof value !== 'string') {
+        return rejectUploadedRequest(res, req.file, 400, `${field} must be a string`);
+      }
+      const normalizedValue = typeof value === 'string' ? value.trim() : '';
+      if (normalizedValue.length > ITEM_TEXT_MAX_LENGTH) {
+        return rejectUploadedRequest(
+          res,
+          req.file,
+          400,
+          `${field} must not exceed ${ITEM_TEXT_MAX_LENGTH} characters`
+        );
+      }
+      normalizedOptionalText[field] = normalizedValue || null;
+    }
 
     if (remarks !== undefined && typeof remarks !== 'string') {
       return rejectUploadedRequest(res, req.file, 400, 'remarks must be a string');
@@ -498,6 +634,12 @@ const createItem = async (req, res) => {
 
     if (!Number.isFinite(normalizedUnitCost) || normalizedUnitCost < 0) {
       return rejectUploadedRequest(res, req.file, 400, 'unit_cost must be a non-negative number');
+    }
+    if (normalizedItemName.length > ITEM_TEXT_MAX_LENGTH) {
+      return rejectUploadedRequest(res, req.file, 400, `item_name must not exceed ${ITEM_TEXT_MAX_LENGTH} characters`);
+    }
+    if (normalizedCategoryName.length > 100) {
+      return rejectUploadedRequest(res, req.file, 400, 'category_name must not exceed 100 characters');
     }
 
     const suppliedClientRequestId = req.get('Idempotency-Key');
@@ -582,7 +724,10 @@ const createItem = async (req, res) => {
       const itemStatus = calculateStatus(normalizedQuantity, normalizedReorderLevel);
 
       const item = await Item.create({
-        item_code, item_name: normalizedItemName, brand, model, serial_number,
+        item_code, item_name: normalizedItemName,
+        brand: normalizedOptionalText.brand,
+        model: normalizedOptionalText.model,
+        serial_number: normalizedOptionalText.serial_number,
         category_id: resolvedCategoryId, location_id: normalizedLocationId,
         quantity: normalizedQuantity, reorder_level: normalizedReorderLevel,
         unit_cost: normalizedUnitCost,
@@ -612,22 +757,24 @@ const createItem = async (req, res) => {
         transaction,
       });
 
+      if (normalizedQuantity > 0) {
+        await ItemMovement.create({
+          item_id: item.item_id,
+          movement_type: 'In',
+          quantity_change: normalizedQuantity,
+          source_destination: 'Initial inventory',
+          remarks: 'Opening quantity when item was created',
+          processed_by: req.user.users_id,
+          movement_date: new Date(),
+        }, { transaction });
+      }
+
       let remarkIssue = null;
       if (normalizedRemarks) {
-        remarkIssue = await ItemRemarkIssue.create({
-          item_id: item.item_id,
+        remarkIssue = await createRemarkIssue({
+          itemId: item.item_id,
           remarks: normalizedRemarks,
-          created_by: req.user.users_id,
-          created_date: fn('GETDATE'),
-          updated_date: fn('GETDATE'),
-        }, {
-          fields: [
-            'item_id',
-            'remarks',
-            'created_by',
-            'created_date',
-            'updated_date',
-          ],
+          createdBy: req.user.users_id,
           transaction,
         });
       }
@@ -663,15 +810,10 @@ const createItem = async (req, res) => {
 
     await removeDuplicateUpload(req.file);
 
-    console.error('Create item error:', error);
-    if (error.errors) {
-      error.errors.forEach(e => console.error(' -', e.message, '| field:', e.path));
+    if (error.status) {
+      return res.status(error.status).json({ message: error.message });
     }
-    res.status(error.status || 500).json({
-      message: error.status ? error.message : 'Failed to create item',
-      error: error.message,
-      details: error.errors ? error.errors.map(e => ({ field: e.path, message: e.message })) : undefined,
-    });
+    sendServerError(res, 'Failed to create item', error);
   }
 };
 
@@ -683,4 +825,6 @@ module.exports = {
   deleteItem,
   uploadItemImage,
   calculateStatus,
+  formatIssueCode,
+  movementTypeForQuantityChange,
 };

@@ -2,10 +2,13 @@ const Disposal = require('../models/disposal');
 const Item = require('../models/item');
 const User = require('../models/user');
 const Notification = require('../models/notification');
+const ItemMovement = require('../models/itemMovement');
 const sequelize = require('../models');
 const { Op, literal } = require('sequelize');
 const { calculateStatus } = require('./itemController');
 const { findFirst } = require('../utils/modelQueries');
+const { sendServerError } = require('../utils/httpError');
+const MAX_PAGE_SIZE = 20;
 
 const attachApproverDetails = async disposals => {
   const approverIds = [
@@ -118,6 +121,7 @@ const createDisposal = async (req, res) => {
         await Notification.bulkCreate(
           reviewers.map(user => ({
             user_id: user.users_id,
+            item_id: normalizedItemId,
             message: 'New disposal request submitted for review.',
             type: 'disposal_requested',
           })),
@@ -130,30 +134,40 @@ const createDisposal = async (req, res) => {
 
     res.status(201).json(disposal);
   } catch (error) {
-    console.error('Create disposal error:', error);
-    if (error.parent && error.parent.message) {
-      console.error('SQL error detail:', error.parent.message);
-    }
-
     if (error.status) {
       return res.status(error.status).json({ message: error.message });
     }
-
-    res.status(500).json({
-      message: 'Failed to create disposal request',
-      error: error.message,
-      sqlError: error.parent ? error.parent.message : undefined,
-    });
+    sendServerError(res, 'Failed to create disposal request', error);
   }
 };
 // GET all disposals. The Approved UI tab contains both Purchasing-approved
 // requests waiting for IT and requests that IT has finished disposing.
 const getDisposals = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, page, limit } = req.query;
+    const paginationRequested = page !== undefined || limit !== undefined;
+    const pageNumber = page === undefined ? 1 : Number(page);
+    const pageSize = limit === undefined ? MAX_PAGE_SIZE : Number(limit);
     const validStatuses = ['Pending Approval', 'For Disposal', 'Disposed', 'Rejected', 'Approved'];
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ message: 'Invalid disposal status filter' });
+    }
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageNumber) || pageNumber < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' });
+    }
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE)) {
+      return res.status(400).json({
+        message: `limit must be an integer between 1 and ${MAX_PAGE_SIZE}`,
+      });
+    }
+
+    const offset = (pageNumber - 1) * pageSize;
+    if (paginationRequested && !Number.isSafeInteger(offset)) {
+      return res.status(400).json({ message: 'page is too large' });
     }
 
     const where = {};
@@ -166,13 +180,27 @@ const getDisposals = async (req, res) => {
     const disposals = await Disposal.findAll({
       where,
       include: [Item],
-      order: [['request_date', 'DESC']],
+      order: [['request_date', 'DESC'], ['disposal_id', 'DESC']],
+      ...(paginationRequested
+        ? { limit: pageSize + 1, offset }
+        : {}),
     });
 
-    const disposalsWithApprovers = await attachApproverDetails(disposals);
+    const hasMore = paginationRequested && disposals.length > pageSize;
+    const pageDisposals = paginationRequested ? disposals.slice(0, pageSize) : disposals;
+    const disposalsWithApprovers = await attachApproverDetails(pageDisposals);
+
+    if (paginationRequested) {
+      res.set({
+        'X-Page': String(pageNumber),
+        'X-Page-Size': String(pageSize),
+        'X-Has-More': String(hasMore),
+      });
+    }
+
     res.status(200).json(disposalsWithApprovers);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch disposals', error: error.message });
+    sendServerError(res, 'Failed to fetch disposals', error);
   }
 };
 
@@ -193,7 +221,7 @@ const getDisposalById = async (req, res) => {
     const [disposalWithApprover] = await attachApproverDetails([disposal]);
     res.status(200).json(disposalWithApprover);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch disposal', error: error.message });
+    sendServerError(res, 'Failed to fetch disposal', error);
   }
 };
 
@@ -238,6 +266,7 @@ const updateDisposalStatus = async (req, res) => {
 
       await Notification.create({
         user_id: lockedDisposal.requested_by,
+        item_id: lockedDisposal.item_id,
         message: `Your disposal request was ${disposal_status === 'For Disposal' ? 'approved' : 'rejected'}.`,
         type: disposal_status === 'For Disposal' ? 'disposal_approved' : 'disposal_rejected',
       }, { transaction });
@@ -250,7 +279,7 @@ const updateDisposalStatus = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({ message: error.message });
     }
-    res.status(500).json({ message: 'Failed to update disposal status', error: error.message });
+    sendServerError(res, 'Failed to update disposal status', error);
   }
 };
 
@@ -317,6 +346,16 @@ const finalizeDisposal = async (req, res) => {
         { transaction }
       );
 
+      await ItemMovement.create({
+        item_id: item.item_id,
+        movement_type: 'Out',
+        quantity_change: -disposalQuantity,
+        source_destination: 'Disposal',
+        remarks: lockedDisposal.reason || 'Finalized disposal request',
+        processed_by: req.user.users_id,
+        movement_date: new Date(),
+      }, { transaction });
+
       await lockedDisposal.update({
         disposal_status: 'Disposed',
         disposed_by: req.user.users_id,
@@ -325,6 +364,7 @@ const finalizeDisposal = async (req, res) => {
 
       await Notification.create({
         user_id: lockedDisposal.requested_by,
+        item_id: lockedDisposal.item_id,
         message: 'Your approved disposal request has been finalized.',
         type: 'disposal_completed',
       }, { transaction });
@@ -334,8 +374,6 @@ const finalizeDisposal = async (req, res) => {
 
     res.status(200).json(disposal);
   } catch (error) {
-    console.error('Finalize disposal error:', error);
-
     if (error.status) {
       return res.status(error.status).json({ message: error.message });
     }
@@ -351,7 +389,7 @@ const finalizeDisposal = async (req, res) => {
       });
     }
 
-    res.status(500).json({ message: 'Failed to finalize disposal', error: error.message });
+    sendServerError(res, 'Failed to finalize disposal', error);
   }
 };
 

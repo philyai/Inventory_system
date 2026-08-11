@@ -7,7 +7,7 @@ const { writeLimiter } = require('../middleware/rateLimiter');
 router.get('/', verifyToken, getDisposals);
 router.get('/:id', verifyToken, getDisposalById);
 router.post('/', verifyToken, requireRole('IT'), writeLimiter, createDisposal);
-router.put('/:id', verifyToken, requireRole('Purchasing'), updateDisposalStatus);
-router.put('/:id/dispose', verifyToken, requireRole('IT'), finalizeDisposal);
+router.put('/:id', verifyToken, requireRole('Purchasing'), writeLimiter, updateDisposalStatus);
+router.put('/:id/dispose', verifyToken, requireRole('IT'), writeLimiter, finalizeDisposal);
 
 module.exports = router;

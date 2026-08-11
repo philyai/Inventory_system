@@ -2,6 +2,7 @@ const { fn, col, Op } = require('sequelize');
 const Item = require('../models/item');
 const Category = require('../models/category');
 const Disposal = require('../models/disposal');
+const { sendServerError } = require('../utils/httpError');
 
 // GET /dashboard/summary
 const getSummary = async (req, res) => {
@@ -25,7 +26,7 @@ const getSummary = async (req, res) => {
       reserved: reservedCount,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch dashboard summary', error: error.message });
+    sendServerError(res, 'Failed to fetch dashboard summary', error);
   }
 };
 
@@ -44,7 +45,7 @@ const getStockByCategory = async (req, res) => {
 
     res.status(200).json(results);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch stock by category', error: error.message });
+    sendServerError(res, 'Failed to fetch stock by category', error);
   }
 };
 

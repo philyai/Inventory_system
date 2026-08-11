@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/user');
+const { fingerprintSessionToken } = require('../utils/sessionToken');
 
 // checks the token is valid and attaches the user to req
 const verifyToken = async (req, res, next) => {
@@ -14,10 +15,20 @@ const verifyToken = async (req, res, next) => {
     // verify signature + expiration
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // confirm this token matches what's stored for the user (single active session)
+    // Confirm this token matches the active session without storing the bearer token itself.
     const user = await User.findByPk(decoded.users_id);
-    if (!user || user.token !== token) {
+    if (!user) {
       return res.status(401).json({ message: 'Invalid or expired session' });
+    }
+
+    const tokenFingerprint = fingerprintSessionToken(token);
+    if (user.token !== tokenFingerprint) {
+      // Transparently migrate sessions created before token fingerprinting.
+      if (user.token !== token) {
+        return res.status(401).json({ message: 'Invalid or expired session' });
+      }
+      user.token = tokenFingerprint;
+      await user.save();
     }
 
     req.user = {

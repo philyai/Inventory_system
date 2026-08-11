@@ -7,10 +7,11 @@ const {
   markAsRead,
 } = require('../controllers/notificationController');
 const { verifyToken } = require('../middleware/authMiddleware');
+const { writeLimiter } = require('../middleware/rateLimiter');
 
 router.get('/', verifyToken, getNotifications);
 router.get('/unread-count', verifyToken, getUnreadCount);
-router.put('/read-all', verifyToken, markAllAsRead);
-router.put('/:id/read', verifyToken, markAsRead);
+router.put('/read-all', verifyToken, writeLimiter, markAllAsRead);
+router.put('/:id/read', verifyToken, writeLimiter, markAsRead);
 
 module.exports = router;

@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calculateStatus } = require('../controllers/itemController');
+const {
+  calculateStatus,
+  formatIssueCode,
+  movementTypeForQuantityChange,
+} = require('../controllers/itemController');
 const { requireRole } = require('../middleware/authMiddleware');
 const { findFirst } = require('../utils/modelQueries');
 const {
@@ -10,6 +14,16 @@ const {
 const { changePassword } = require('../controllers/profileController');
 const User = require('../models/user');
 const bcrypt = require('bcrypt');
+const { fingerprintSessionToken } = require('../utils/sessionToken');
+
+test('session token fingerprints are deterministic and do not expose the token', () => {
+  const token = 'header.payload.signature';
+  const fingerprint = fingerprintSessionToken(token);
+
+  assert.equal(fingerprint.length, 64);
+  assert.equal(fingerprint, fingerprintSessionToken(token));
+  assert.notEqual(fingerprint, token);
+});
 
 test('calculateStatus returns Out of Stock for zero or negative quantity', () => {
   assert.equal(calculateStatus(0, 5), 'Out of Stock');
@@ -23,6 +37,22 @@ test('calculateStatus returns Low Stock at or below the reorder level', () => {
 
 test('calculateStatus returns In Stock above the reorder level', () => {
   assert.equal(calculateStatus(6, 5), 'In Stock');
+});
+
+test('formatIssueCode preserves the established padded issue code format', () => {
+  assert.equal(formatIssueCode(46), 'ISS-000046');
+});
+
+test('quantity increases are reported as In movements', () => {
+  assert.equal(movementTypeForQuantityChange(5), 'In');
+});
+
+test('quantity decreases are reported as Out movements', () => {
+  assert.equal(movementTypeForQuantityChange(-3), 'Out');
+});
+
+test('unchanged quantity does not create a movement', () => {
+  assert.equal(movementTypeForQuantityChange(0), null);
 });
 
 test('Admin IT bypasses role-specific restrictions', () => {
@@ -157,7 +187,6 @@ test('change password verifies the current password, hashes the replacement, and
       {
         user: { users_id: 7 },
         body: {
-          username: 'it.admin',
           current_password: 'current-password',
           new_password: 'replacement-password',
           confirm_password: 'replacement-password',
@@ -181,7 +210,10 @@ test('change password verifies the current password, hashes the replacement, and
   }
 
   assert.equal(statusCode, 200);
-  assert.deepEqual(responseBody, { message: 'Password changed successfully' });
+  assert.deepEqual(responseBody, {
+    message: 'Password changed successfully. Please sign in again.',
+    requires_reauthentication: true,
+  });
   assert.equal(user.password_hash, 'new-hash');
   assert.equal(saved, true);
 });

@@ -2,6 +2,7 @@ const sequelize = require('../models/index');
 const ItemMovement = require('../models/itemMovement');
 const Item = require('../models/item');
 const { calculateStatus } = require('./itemController');
+const { sendServerError } = require('../utils/httpError');
 
 const VALID_TYPES = ['In', 'Out', 'Adjustment'];
 
@@ -81,7 +82,7 @@ const createMovement = async (req, res) => {
     if (error.status) {
       return res.status(error.status).json({ message: error.message });
     }
-    res.status(500).json({ message: 'Failed to record movement', error: error.message });
+    sendServerError(res, 'Failed to record movement', error);
   }
 };
 
@@ -117,7 +118,7 @@ const getMovements = async (req, res) => {
 
     res.status(200).json(movements);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch movements', error: error.message });
+    sendServerError(res, 'Failed to fetch movements', error);
   }
 };
 

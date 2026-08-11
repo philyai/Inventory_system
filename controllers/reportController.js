@@ -4,6 +4,8 @@ const Category = require('../models/category');
 const ItemLocation = require('../models/itemLocation');
 const ItemMovement = require('../models/itemMovement');
 const Disposal = require('../models/disposal');
+const { sendServerError } = require('../utils/httpError');
+const MAX_PAGE_SIZE = 20;
 
 function isValidDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -24,7 +26,7 @@ const getStockSummary = async (req, res) => {
       total_value: totalValue || 0,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch stock summary', error: error.message });
+    sendServerError(res, 'Failed to fetch stock summary', error);
   }
 };
 
@@ -40,7 +42,7 @@ const getLowStockReport = async (req, res) => {
     });
     res.status(200).json(items);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch low stock report', error: error.message });
+    sendServerError(res, 'Failed to fetch low stock report', error);
   }
 };
 
@@ -74,7 +76,7 @@ const getDisposalReport = async (req, res) => {
       disposals,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch disposal report', error: error.message });
+    sendServerError(res, 'Failed to fetch disposal report', error);
   }
 };
 
@@ -93,7 +95,7 @@ const getCategoryReport = async (req, res) => {
     });
     res.status(200).json(results);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch category report', error: error.message });
+    sendServerError(res, 'Failed to fetch category report', error);
   }
 };
 
@@ -117,15 +119,43 @@ const getLocationReport = async (req, res) => {
     });
     res.status(200).json(results);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch location report', error: error.message });
+    sendServerError(res, 'Failed to fetch location report', error);
   }
 };
 
 // GET /reports/stock-movement
 const getStockMovementReport = async (req, res) => {
   try {
-    const { start_date, end_date } = req.query;
+    const { start_date, end_date, movement_type, page, limit } = req.query;
+    const paginationRequested = page !== undefined || limit !== undefined;
+    const pageNumber = page === undefined ? 1 : Number(page);
+    const pageSize = limit === undefined ? MAX_PAGE_SIZE : Number(limit);
     const where = {};
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageNumber) || pageNumber < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' });
+    }
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE)) {
+      return res.status(400).json({
+        message: `limit must be an integer between 1 and ${MAX_PAGE_SIZE}`,
+      });
+    }
+
+    const offset = (pageNumber - 1) * pageSize;
+    if (paginationRequested && !Number.isSafeInteger(offset)) {
+      return res.status(400).json({ message: 'page is too large' });
+    }
+
+    if (movement_type && !['In', 'Out', 'Adjustment'].includes(movement_type)) {
+      return res.status(400).json({ message: 'Invalid movement_type filter' });
+    }
+
+    if (movement_type) {
+      where.movement_type = movement_type;
+    }
 
     if (start_date && !isValidDate(start_date)) {
       return res.status(400).json({ message: 'start_date must use YYYY-MM-DD format' });
@@ -150,12 +180,26 @@ const getStockMovementReport = async (req, res) => {
     const movements = await ItemMovement.findAll({
       where,
       include: [Item],
-      order: [['movement_date', 'DESC']],
+      order: [['movement_date', 'DESC'], ['movement_id', 'DESC']],
+      ...(paginationRequested
+        ? { limit: pageSize + 1, offset }
+        : {}),
     });
 
-    res.status(200).json(movements);
+    const hasMore = paginationRequested && movements.length > pageSize;
+    const pageMovements = paginationRequested ? movements.slice(0, pageSize) : movements;
+
+    if (paginationRequested) {
+      res.set({
+        'X-Page': String(pageNumber),
+        'X-Page-Size': String(pageSize),
+        'X-Has-More': String(hasMore),
+      });
+    }
+
+    res.status(200).json(pageMovements);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch stock movement report', error: error.message });
+    sendServerError(res, 'Failed to fetch stock movement report', error);
   }
 };
 

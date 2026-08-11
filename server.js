@@ -18,10 +18,25 @@ const systemRoutes = require('./routes/systemRoutes');
 
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+const isProduction = process.env.NODE_ENV === 'production';
+const allowedOrigins = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || !isProduction || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
+}));
+app.use(express.json({ limit: '100kb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.set('trust proxy', 1);
+if (process.env.TRUST_PROXY) {
+  app.set('trust proxy', process.env.TRUST_PROXY);
+}
 app.get('/health', async (req, res) => {
   try {
     await sequelize.authenticate();
@@ -101,6 +116,13 @@ const connectDatabase = async () => {
 
 const startServer = async () => {
   try {
+    if (isProduction) {
+      const requiredVariables = ['JWT_SECRET', 'DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+      const missingVariables = requiredVariables.filter(name => !process.env[name]);
+      if (missingVariables.length > 0) {
+        throw new Error(`Missing required production environment variables: ${missingVariables.join(', ')}`);
+      }
+    }
     await connectDatabase();
     app.listen(port, host, () => {
       console.log(`Server running on http://${host}:${port}`);

@@ -1,6 +1,7 @@
 const ItemLocation = require('../models/itemLocation');
 const { Op } = require('sequelize');
 const { findFirst } = require('../utils/modelQueries');
+const { sendServerError } = require('../utils/httpError');
 
 function normalizeLocationName(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -13,7 +14,7 @@ const getLocations = async (req, res) => {
     });
     res.status(200).json(locations);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch locations', error: error.message });
+    sendServerError(res, 'Failed to fetch locations', error);
   }
 }; 
 
@@ -25,6 +26,12 @@ const createLocation = async (req, res) => {
     if (!normalizedName) {
       return res.status(400).json({ message: 'location_name is required' });
     }
+    if (normalizedName.length > 100) {
+      return res.status(400).json({ message: 'location_name must not exceed 100 characters' });
+    }
+    if (description !== undefined && (typeof description !== 'string' || description.length > 500)) {
+      return res.status(400).json({ message: 'description must be a string of at most 500 characters' });
+    }
 
     const existing = await findFirst(ItemLocation, { where: { location_name: normalizedName } });
     if (existing) {
@@ -34,7 +41,7 @@ const createLocation = async (req, res) => {
     const newLocation = await ItemLocation.create({ location_name: normalizedName, description });
     res.status(201).json(newLocation);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to create location', error: error.message });
+    sendServerError(res, 'Failed to create location', error);
   }
 };
 
@@ -56,6 +63,9 @@ const updateLocation = async (req, res) => {
       if (!normalizedName) {
         return res.status(400).json({ message: 'location_name cannot be empty' });
       }
+      if (normalizedName.length > 100) {
+        return res.status(400).json({ message: 'location_name must not exceed 100 characters' });
+      }
 
       const duplicate = await findFirst(ItemLocation, {
         where: {
@@ -70,6 +80,9 @@ const updateLocation = async (req, res) => {
     }
 
     if (req.body.description !== undefined) {
+      if (typeof req.body.description !== 'string' || req.body.description.length > 500) {
+        return res.status(400).json({ message: 'description must be a string of at most 500 characters' });
+      }
       updates.description = req.body.description;
     }
 
@@ -80,7 +93,7 @@ const updateLocation = async (req, res) => {
     await location.update(updates);
     res.status(200).json(location);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update location', error: error.message });
+    sendServerError(res, 'Failed to update location', error);
   }
 };
 
@@ -104,7 +117,7 @@ const deleteLocation = async (req, res) => {
         message: 'Cannot delete this location because items are still assigned to it',
       });
     }
-    res.status(500).json({ message: 'Failed to delete location', error: error.message });
+    sendServerError(res, 'Failed to delete location', error);
   }
 };
 

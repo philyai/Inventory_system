@@ -5,7 +5,7 @@ const { verifyToken, requireRole } = require('../middleware/authMiddleware');
 const { writeLimiter } = require('../middleware/rateLimiter');
 
 router.get('/', verifyToken, getProfile);
-router.put('/change-password', verifyToken, changePassword);
+router.put('/change-password', verifyToken, writeLimiter, changePassword);
 router.post('/add-account', verifyToken, requireRole('Admin IT'), writeLimiter, addAccount);
 
 module.exports = router;

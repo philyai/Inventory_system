@@ -1,6 +1,7 @@
 const Category = require('../models/category');
 const { Op } = require('sequelize');
 const { findFirst } = require('../utils/modelQueries');
+const { sendServerError } = require('../utils/httpError');
 
 // GET all categories
 const getCategories = async (req, res) => {
@@ -15,7 +16,7 @@ const getCategories = async (req, res) => {
 
     res.status(200).json(visibleCategories);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch categories', error: error.message });
+    sendServerError(res, 'Failed to fetch categories', error);
   }
 };
 
@@ -23,11 +24,17 @@ const createCategory = async (req, res) => {
   try {
     const { category_name, description } = req.body;
 
-    if (!category_name || !category_name.trim()) {
+    if (typeof category_name !== 'string' || !category_name.trim()) {
       return res.status(400).json({ message: 'category_name is required' });
     }
 
     const normalizedName = category_name.trim();
+    if (normalizedName.length > 100) {
+      return res.status(400).json({ message: 'category_name must not exceed 100 characters' });
+    }
+    if (description !== undefined && (typeof description !== 'string' || description.length > 500)) {
+      return res.status(400).json({ message: 'description must be a string of at most 500 characters' });
+    }
     const existing = await findFirst(Category, { where: { category_name: normalizedName } });
     if (existing) {
       return res.status(409).json({ message: 'A category with this name already exists' });
@@ -36,7 +43,7 @@ const createCategory = async (req, res) => {
     const newCategory = await Category.create({ category_name: normalizedName, description });
     res.status(201).json(newCategory);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to create category', error: error.message });
+    sendServerError(res, 'Failed to create category', error);
   }
 };
 
@@ -61,6 +68,9 @@ const updateCategory = async (req, res) => {
       }
 
       const normalizedName = category_name.trim();
+      if (normalizedName.length > 100) {
+        return res.status(400).json({ message: 'category_name must not exceed 100 characters' });
+      }
       const existing = await findFirst(Category, {
         where: {
           category_name: normalizedName,
@@ -72,7 +82,12 @@ const updateCategory = async (req, res) => {
       }
       updates.category_name = normalizedName;
     }
-    if (description !== undefined) updates.description = description;
+    if (description !== undefined) {
+      if (typeof description !== 'string' || description.length > 500) {
+        return res.status(400).json({ message: 'description must be a string of at most 500 characters' });
+      }
+      updates.description = description;
+    }
 
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ message: 'No category fields were provided' });
@@ -81,7 +96,7 @@ const updateCategory = async (req, res) => {
     await category.update(updates);
     res.status(200).json(category);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to update category', error: error.message });
+    sendServerError(res, 'Failed to update category', error);
   }
 };
 
@@ -106,7 +121,7 @@ const deleteCategory = async (req, res) => {
         message: 'Cannot delete this category because items are still assigned to it',
       });
     }
-    res.status(500).json({ message: 'Failed to delete category', error: error.message });
+    sendServerError(res, 'Failed to delete category', error);
   }
 };
 

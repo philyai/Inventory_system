@@ -1,8 +1,33 @@
 const Notification = require('../models/notification');
+const Item = require('../models/item');
+const { sendServerError } = require('../utils/httpError');
+const MAX_PAGE_SIZE = 20;
 
 // GET the logged-in user's notifications
 const getNotifications = async (req, res) => {
   try {
+    const { page, limit } = req.query;
+    const paginationRequested = page !== undefined || limit !== undefined;
+    const pageNumber = page === undefined ? 1 : Number(page);
+    const pageSize = limit === undefined ? MAX_PAGE_SIZE : Number(limit);
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageNumber) || pageNumber < 1)) {
+      return res.status(400).json({ message: 'page must be a positive integer' });
+    }
+
+    if (paginationRequested
+        && (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > MAX_PAGE_SIZE)) {
+      return res.status(400).json({
+        message: `limit must be an integer between 1 and ${MAX_PAGE_SIZE}`,
+      });
+    }
+
+    const offset = (pageNumber - 1) * pageSize;
+    if (paginationRequested && !Number.isSafeInteger(offset)) {
+      return res.status(400).json({ message: 'page is too large' });
+    }
+
     const where = { user_id: req.user.users_id };
     if (req.query.unread_only === 'true') {
       where.is_read = false;
@@ -10,11 +35,48 @@ const getNotifications = async (req, res) => {
 
     const notifications = await Notification.findAll({
       where,
-      order: [['created_at', 'DESC']],
+      order: [['created_at', 'DESC'], ['notification_id', 'DESC']],
+      ...(paginationRequested
+        ? { limit: pageSize + 1, offset }
+        : {}),
     });
-    res.status(200).json(notifications);
+
+    const hasMore = paginationRequested && notifications.length > pageSize;
+    const pageNotifications = paginationRequested
+      ? notifications.slice(0, pageSize)
+      : notifications;
+
+    const itemIds = [...new Set(pageNotifications
+      .map(notification => Number(notification.item_id))
+      .filter(itemId => Number.isSafeInteger(itemId) && itemId > 0))];
+    const items = itemIds.length > 0
+      ? await Item.findAll({
+        where: { item_id: itemIds },
+        attributes: ['item_id', 'item_name', 'image_url'],
+      })
+      : [];
+    const itemsById = new Map(items.map(item => [Number(item.item_id), item]));
+    const responseNotifications = pageNotifications.map(notification => {
+      const responseNotification = notification.toJSON();
+      const item = itemsById.get(Number(notification.item_id));
+      return {
+        ...responseNotification,
+        item_name: item ? item.item_name : null,
+        image_url: item ? item.image_url : null,
+      };
+    });
+
+    if (paginationRequested) {
+      res.set({
+        'X-Page': String(pageNumber),
+        'X-Page-Size': String(pageSize),
+        'X-Has-More': String(hasMore),
+      });
+    }
+
+    res.status(200).json(responseNotifications);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch notifications', error: error.message });
+    sendServerError(res, 'Failed to fetch notifications', error);
   }
 };
 
@@ -29,7 +91,7 @@ const getUnreadCount = async (req, res) => {
 
     res.status(200).json({ unread_count: unreadCount });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch unread notification count', error: error.message });
+    sendServerError(res, 'Failed to fetch unread notification count', error);
   }
 };
 
@@ -50,7 +112,7 @@ const markAllAsRead = async (req, res) => {
       updated_count: updatedCount,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to mark notifications as read', error: error.message });
+    sendServerError(res, 'Failed to mark notifications as read', error);
   }
 };
 
@@ -77,7 +139,7 @@ const markAsRead = async (req, res) => {
 
     res.status(200).json(notification);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to mark notification as read', error: error.message });
+    sendServerError(res, 'Failed to mark notification as read', error);
   }
 };
 

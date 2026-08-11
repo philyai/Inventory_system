@@ -5,6 +5,8 @@ const User = require('../models/user');
 const LoginSession = require('../models/loginSession');
 const sequelize = require('../models');
 const { findFirst } = require('../utils/modelQueries');
+const { fingerprintSessionToken } = require('../utils/sessionToken');
+const { sendServerError } = require('../utils/httpError');
 
 // --- Account-based throttling (in-memory) ---
 // Tracks failed attempts per username, independent of IP.
@@ -94,6 +96,10 @@ const signIn = async (req, res) => {
       return res.status(400).json({ message: 'username and password are required' });
     }
 
+    if (username.trim().length > 100 || password.length > 128) {
+      return res.status(400).json({ message: 'Invalid username or password' });
+    }
+
     const normalizedUsername = username.trim();
     const record = getRecord(normalizedUsername);
     if (record.lockUntil && record.lockUntil > Date.now()) {
@@ -155,7 +161,7 @@ const signIn = async (req, res) => {
 
       token = createToken(user, loginSession.login_session_id);
 
-      user.token = token;
+      user.token = fingerprintSessionToken(token);
       await user.save({ transaction });
       await transaction.commit();
     } catch (error) {
@@ -169,7 +175,7 @@ const signIn = async (req, res) => {
       );
       loginSession = null;
       token = createToken(user);
-      user.token = token;
+      user.token = fingerprintSessionToken(token);
       await user.save();
     }
 
@@ -187,7 +193,7 @@ const signIn = async (req, res) => {
 
     res.status(200).json(response);
   } catch (error) {
-    res.status(500).json({ message: 'Sign in failed', error: error.message });
+    sendServerError(res, 'Sign in failed', error);
   }
 };
 
@@ -236,7 +242,7 @@ const logout = async (req, res) => {
 
     res.status(200).json({ message: 'Logged out successfully' });
   } catch (error) {
-    res.status(500).json({ message: 'Logout failed', error: error.message });
+    sendServerError(res, 'Logout failed', error);
   }
 };
 

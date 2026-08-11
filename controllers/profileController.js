@@ -1,7 +1,9 @@
 const bcrypt = require('bcrypt');
+const validator = require('validator');
 const { Op, literal } = require('sequelize');
 const User = require('../models/user');
 const { findFirst } = require('../utils/modelQueries');
+const { sendServerError } = require('../utils/httpError');
 
 const ACCOUNT_ROLES = ['Admin IT', 'IT', 'Purchasing'];
 
@@ -18,7 +20,7 @@ const getProfile = async (req, res) => {
 
     res.status(200).json(user);
   } catch (error) {
-    res.status(500).json({ message: 'Failed to fetch profile', error: error.message });
+    sendServerError(res, 'Failed to fetch profile', error);
   }
 };
 
@@ -32,22 +34,24 @@ const changePassword = async (req, res) => {
     } = req.body;
 
     if (
-      typeof username !== 'string' ||
       typeof current_password !== 'string' ||
       typeof new_password !== 'string' ||
       typeof confirm_password !== 'string' ||
-      !username.trim() ||
       !current_password ||
       !new_password ||
       !confirm_password
     ) {
       return res.status(400).json({
-        message: 'username, current_password, new_password, and confirm_password are required',
+        message: 'current_password, new_password, and confirm_password are required',
       });
     }
 
     if (new_password.length < 8) {
       return res.status(400).json({ message: 'New password must be at least 8 characters' });
+    }
+
+    if (new_password.length > 128 || current_password.length > 128) {
+      return res.status(400).json({ message: 'Password must not exceed 128 characters' });
     }
 
     if (new_password !== confirm_password) {
@@ -57,10 +61,6 @@ const changePassword = async (req, res) => {
     const user = await User.findByPk(req.user.users_id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
-    }
-
-    if (user.username !== username.trim()) {
-      return res.status(403).json({ message: 'Username does not match the signed-in user' });
     }
 
     const isMatch = await bcrypt.compare(current_password, user.password_hash);
@@ -78,7 +78,7 @@ const changePassword = async (req, res) => {
       requires_reauthentication: true,
     });
   } catch (error) {
-    res.status(500).json({ message: 'Failed to change password', error: error.message });
+    sendServerError(res, 'Failed to change password', error);
   }
 };
 
@@ -113,6 +113,15 @@ const addAccount = async (req, res) => {
 
     const normalizedUsername = username.trim();
     const normalizedEmail = email.trim().toLowerCase();
+    if (normalizedUsername.length > 100) {
+      return res.status(400).json({ message: 'Username must not exceed 100 characters' });
+    }
+    if (normalizedEmail.length > 254 || !validator.isEmail(normalizedEmail)) {
+      return res.status(400).json({ message: 'A valid email address is required' });
+    }
+    if (password.length > 128) {
+      return res.status(400).json({ message: 'Password must not exceed 128 characters' });
+    }
     const existingUser = await findFirst(User, {
       where: {
         [Op.or]: [
@@ -153,7 +162,7 @@ const addAccount = async (req, res) => {
       return res.status(409).json({ message: 'Username or email is already in use' });
     }
 
-    res.status(500).json({ message: 'Failed to create account', error: error.message });
+    sendServerError(res, 'Failed to create account', error);
   }
 };
 

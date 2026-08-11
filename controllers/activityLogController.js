@@ -1,4 +1,5 @@
 const LoginSession = require('../models/loginSession');
+const { sendServerError } = require('../utils/httpError');
 
 function isMissingLoginSessionsTable(error) {
   let currentError = error;
@@ -46,7 +47,7 @@ const getActivityLogs = async (req, res) => {
         message: 'Activity logs require the login_sessions database table.',
       });
     }
-    res.status(500).json({ message: 'Failed to fetch activity logs', error: error.message });
+    sendServerError(res, 'Failed to fetch activity logs', error);
   }
 };
 

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/white"
+    android:layout_marginBottom="9dp">
+
+    <LinearLayout
+        android:id="@+id/locHeader"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="13dp"
+        android:gravity="center_vertical"
+        android:clickable="true"
+        android:focusable="true">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/locName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/placeholder"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="@color/dark_gray" />
+
+            <TextView
+                android:id="@+id/locDescription"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/placeholder"
+                android:textColor="@color/gray_blue"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/locItemCount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/placeholder"
+            android:textSize="11sp"
+            android:textColor="@color/deep_blue"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/locChevron"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⌄"
+            android:textSize="14sp"
+            android:textColor="@color/gray_blue" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/locDetail"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="13dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/locUnits"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:text="@string/placeholder"
+            android:textColor="@color/dark_gray"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/locValue"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="7dp"
+            android:text="@string/placeholder"
+            android:textColor="@color/dark_gray"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:id="@+id/locItemsContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+    </LinearLayout>
+
+</LinearLayout>

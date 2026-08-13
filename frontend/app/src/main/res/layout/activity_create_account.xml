@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/ghostwhite">
+    <include layout="@layout/view_settings_header" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="24dp">
+            <TextView style="@style/SettingsScreenTitle" android:text="Create Account" />
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/layoutUsername" style="@style/SettingsInput" android:hint="Username">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputUsername" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:singleLine="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/layoutEmail" style="@style/SettingsInput" android:hint="Email">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputEmail" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="textEmailAddress"
+                    android:singleLine="true" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/layoutPassword" style="@style/SettingsInput"
+                android:hint="Password" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputPassword" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="textPassword" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/layoutConfirmPassword" style="@style/SettingsInput"
+                android:hint="Confirm Password" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inputConfirmPassword" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:inputType="textPassword" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/SettingsInput" android:hint="Role"
+                app:endIconMode="dropdown_menu">
+                <AutoCompleteTextView android:id="@+id/inputRole"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:inputType="none" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnSubmit"
+                android:layout_width="match_parent" android:layout_height="52dp"
+                android:layout_marginTop="12dp" android:text="Create Account"
+                android:textAllCaps="false" app:backgroundTint="@color/dark_navy" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

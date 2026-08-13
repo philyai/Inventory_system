@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/ghostwhite">
+    <include layout="@layout/view_settings_header" />
+    <ProgressBar android:id="@+id/progress" android:layout_width="wrap_content"
+        android:layout_height="wrap_content" android:layout_gravity="center"
+        android:layout_margin="20dp" />
+    <TextView android:id="@+id/txtState" android:layout_width="match_parent"
+        android:layout_height="wrap_content" android:gravity="center"
+        android:padding="24dp" android:visibility="gone" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="24dp">
+            <TextView style="@style/SettingsScreenTitle" android:text="About the System" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowSystemName" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowFirmware" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowApplication" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowApi" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowRuntime" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowOs" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowArchitecture" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowDatabase" />
+            <include layout="@layout/item_system_information" android:id="@+id/rowUptime" />
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

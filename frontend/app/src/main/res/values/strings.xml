@@ -1,0 +1,127 @@
+<resources>
+ <string name="BrandName">CGOC</string>
+ <string name="loginTitle">IT Inventory System</string>
+ <string name="Description">Manage.Monitor Track.All IT Assets In One Place.</string>
+ <string name="Username">Username</string>
+ <string name="Password">Password</string>
+ <string name="Remember">Remember Me</string>
+ <string name="Sign">Sign in</string>
+ <string name="Disclaimer">© 2024 Cheng Group of Companies \nAll rights reserved.</string>
+
+ <string name="DB">Dashboard</string>
+ <string name="Greet">Good morning,</string>
+ <string name="ITAdmin">IT Administrator</string>
+ <string name="Greetings">Here\'s your inventory overview for today.</string>
+
+ <string name="Item">Items</string>
+ <string name="Home">Home</string>
+ <string name="Reports">Reports</string>
+ <string name="Notif">Notifications</string>
+ <string name="User">Profile</string>
+ <string name="logout">Log out</string>
+
+ <string name="Category">Select Category</string>
+ <string name="ItemName">Enter item name </string>
+ <string name="Brand">Enter Brand *</string>
+ <string name="Model">Enter Model *</string>
+ <string name="Code">Enter serial number or code *</string>
+
+ <string name="Ctgry">Category *</string>
+ <string name="ItNm">Item Name *</string>
+ <string name="Brnd">Brand *</string>
+ <string name="Mdl">Model *</string>
+ <string name="SNC">Serial Number/Code *</string>
+ <string name="Quant">Quantity *</string>
+ <string name="UC">Unit Cost *</string>
+
+ <string name="add">Add New Item</string>
+ <string name="app_name">Inventory System</string>
+ <string name="title_activity_login_page">Login</string>
+
+ <string name="total_items">Total Items</string>
+ <string name="placeholder">—</string>
+ <string name="value">Total Value</string>
+ <string name="Item_stock">Items in Stock</string>
+ <string name="stock_status">Low Stock</string>
+ <string name="for_Disposal">for Disposal</string>
+ <string name="res">Reserved</string>
+
+ <string name="stock_category">Stock by Category</string>
+ <string name="monitors">Monitors</string>
+ <string name="printers">Printers</string>
+ <string name="avr_ups">AVR/UPS</string>
+ <string name="power_plug">Power Plug</string>
+ <string name="connectors">Connectors</string>
+ <string name="others">Others</string>
+
+ <string name="item_name">Item Name</string>
+ <string name="item_code_placeholder">Item Code</string>
+ <string name="all_filter">All</string>
+ <string name="filter">Filter</string>
+
+ <string name="Quantity">Qty</string>
+ <string name="location">Location</string>
+ <string name="locations">Enter Location Id</string>
+ <string name="categories">Select Category</string>
+ <string name="category">Category</string>
+ <string name="custom_category_hint">Enter a specific category</string>
+
+ <string name="ItmName">Item Name*</string>
+ <string name="SearchItm">Search Items...</string>
+
+ <string name="details_title">Item Details</string>
+ <string name="product_information">Product information</string>
+ <string name="inventory_information">Inventory information</string>
+ <string name="category_label">CATEGORY</string>
+ <string name="brand_label">BRAND</string>
+ <string name="model_label">MODEL</string>
+ <string name="serial_number_label">SERIAL NUMBER / CODE</string>
+ <string name="quantity_label">QUANTITY IN STOCK</string>
+ <string name="unit_cost_label">UNIT COST</string>
+ <string name="total_value_label">TOTAL VALUE</string>
+ <string name="location_label">LOCATION</string>
+ <string name="date_added_label">DATE ADDED</string>
+ <string name="dropdown_category">Category Dropdown</string>
+ <string name="dropdown_location">Location Dropdown</string>
+
+ <string name="back">Back</string>
+
+ <string name="placeholder_cost">0.00</string>
+ <string name="placeholder_quantity">0</string>
+
+ <string name="save_item">Save Item</string>
+ <string name="reorder_level">Reorder Level</string>
+ <string name="add_photo">Add Photo</string>
+
+ <string name="menu">Menu</string>
+ <string name="search">Search</string>
+ <string name="item_photo">Item Photo</string>
+
+ <string name="stock_movement">Stock Movement</string>
+ <string name="low_stock">Low Stock</string>
+ <string name="disposal">Disposal</string>
+
+ <string name="in">In</string>
+ <string name="out">Out</string>
+ <string name="adjustment">Adjustment</string>
+
+ <string name="today">Today</string>
+ <string name="yesterday">Yesterday</string>
+
+ <string name="review">Review affected items</string>
+ <string name="critical">Critical</string>
+ <string name="reorder">Reorder</string>
+
+ <string name="pending_approval">Pending Approval</string>
+ <string name="approved">Approved</string>
+ <string name="rejected">Rejected</string>
+ <string name="disposed">Disposed</string>
+ <string name="disposal_requests">Review and manage disposal requests.</string>
+
+ <string name="pending">Pending</string>
+ <string name="no_data_available">No data available</string>
+ <string name="reject">Reject</string>
+ <string name="approve">Approve</string>
+
+
+</resources>

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
+
+    <application
+        android:name=".InventoryApplication"
+        android:usesCleartextTraffic="${usesCleartextTraffic}"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.InventorySystem">
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <activity
+            android:name=".LoginPage"
+            android:exported="true"
+            android:label="@string/title_activity_login_page">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".DashboardActivity"
+            android:theme="@style/Theme.InventorySystem"
+            android:exported="false" />
+        <activity android:name=".PendingSyncActivity" android:exported="false" />
+        <activity
+            android:name=".AddItemActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ItemsActivity"
+            android:exported="false"/>
+        <activity
+            android:name=".ReportsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ItemDetailsActivity"
+            android:exported="false" />
+        <activity
+            android:name=".EditItemActivity"
+            android:exported="false" />
+        <activity
+            android:name=".DisposalActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ProfileActivity"
+            android:exported="false" />
+        <activity android:name=".ActivityLogsActivity" android:exported="false" />
+        <activity android:name=".CreateAccountActivity" android:exported="false" />
+        <activity android:name=".ChangePasswordActivity" android:exported="false" />
+        <activity android:name=".AboutSystemActivity" android:exported="false" />
+        <activity
+            android:name=".NotificationsActivity"
+            android:exported="false" />
+
+    </application>
+
+</manifest>

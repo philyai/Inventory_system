@@ -1,0 +1,34 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.InventorySystem" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary brand color. -->
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <!-- Secondary brand color. -->
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <!-- Status bar color. -->
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <item name="android:scrollViewStyle">@style/InventorySystemScrollViewScrollbar</item>
+        <item name="android:horizontalScrollViewStyle">@style/InventorySystemHorizontalScrollViewScrollbar</item>
+        <item name="nestedScrollViewStyle">@style/InventorySystemNestedScrollViewScrollbar</item>
+        <item name="recyclerViewStyle">@style/InventorySystemRecyclerViewScrollbar</item>
+    </style>
+
+    <style name="Theme.InventorySystem.Dashboard"
+        parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/purple_500</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/black</item>
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+        <item name="android:scrollViewStyle">@style/InventorySystemScrollViewScrollbar</item>
+        <item name="android:horizontalScrollViewStyle">@style/InventorySystemHorizontalScrollViewScrollbar</item>
+        <item name="nestedScrollViewStyle">@style/InventorySystemNestedScrollViewScrollbar</item>
+        <item name="recyclerViewStyle">@style/InventorySystemRecyclerViewScrollbar</item>
+    </style>
+</resources>

@@ -1,0 +1,31 @@
+# Add project specific R8 rules here.
+# AGP will combine all keep rule files in src/main/keepRules to pass to R8
+#
+# For more details, see
+#   https://d.android.com/r/tools/r8/keep-rules
+
+# If your project uses WebView with JS, uncomment the following
+# and specify the fully qualified class name to the JavaScript interface
+# class:
+#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
+#   public *;
+#}
+
+-keepattributes Signature,*Annotation*
+
+# Gson constructs API models reflectively.
+-keep class com.inventorysystem.Model.** { <fields>; }
+-keep class com.inventorysystem.DashboardModel { <fields>; }
+-keep class com.inventorysystem.StockCategoryModel { <fields>; }
+
+# Room generates access code for these persisted queue records.
+-keep class com.inventorysystem.offline.*Entity { *; }
+
+# Release builds must not emit application log data.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+    public static int w(...);
+    public static int e(...);
+}
